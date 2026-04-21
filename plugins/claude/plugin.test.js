@@ -10,6 +10,7 @@ describe("claude plugin", () => {
   beforeEach(() => {
     delete globalThis.__openusage_plugin
     vi.resetModules()
+    vi.useRealTimers()
   })
 
   it("throws when no credentials", async () => {
@@ -1072,6 +1073,7 @@ describe("claude plugin", () => {
     })
 
     it("matches UTC timestamp day keys at month boundary (regression)", async () => {
+      const plugin = await loadPlugin()
       vi.useFakeTimers()
       vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0))
       try {
@@ -1080,7 +1082,6 @@ describe("claude plugin", () => {
               { date: "2026-03-01T12:00:00Z", inputTokens: 10, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 10, totalCost: 0.1 },
             ]),
         })
-        const plugin = await loadPlugin()
         const result = plugin.probe(ctx)
         const todayLine = result.lines.find((l) => l.label === "Today")
         expect(todayLine).toBeTruthy()
@@ -1091,6 +1092,7 @@ describe("claude plugin", () => {
     })
 
     it("matches UTC+9 timestamp day keys at month boundary (regression)", async () => {
+      const plugin = await loadPlugin()
       vi.useFakeTimers()
       vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0))
       try {
@@ -1099,7 +1101,6 @@ describe("claude plugin", () => {
               { date: "2026-03-01T00:30:00+09:00", inputTokens: 20, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 20, totalCost: 0.2 },
             ]),
         })
-        const plugin = await loadPlugin()
         const result = plugin.probe(ctx)
         const todayLine = result.lines.find((l) => l.label === "Today")
         expect(todayLine).toBeTruthy()
@@ -1110,6 +1111,7 @@ describe("claude plugin", () => {
     })
 
     it("matches UTC-8 timestamp day keys at day boundary (regression)", async () => {
+      const plugin = await loadPlugin()
       vi.useFakeTimers()
       vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0))
       try {
@@ -1118,7 +1120,6 @@ describe("claude plugin", () => {
               { date: "2026-03-01T23:30:00-08:00", inputTokens: 30, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 30, totalCost: 0.3 },
             ]),
         })
-        const plugin = await loadPlugin()
         const result = plugin.probe(ctx)
         const todayLine = result.lines.find((l) => l.label === "Today")
         expect(todayLine).toBeTruthy()
@@ -1241,11 +1242,11 @@ describe("claude plugin", () => {
     })
 
     it("queries ccusage with a 31-day inclusive since window", async () => {
+      const plugin = await loadPlugin()
       vi.useFakeTimers()
       vi.setSystemTime(new Date("2026-02-20T16:00:00.000Z"))
       try {
         const ctx = makeProbeCtx({ ccusageResult: okUsage([]) })
-        const plugin = await loadPlugin()
         plugin.probe(ctx)
         expect(ctx.host.ccusage.query).toHaveBeenCalled()
 

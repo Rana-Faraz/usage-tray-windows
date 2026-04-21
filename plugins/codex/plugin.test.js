@@ -10,6 +10,7 @@ describe("codex plugin", () => {
   beforeEach(() => {
     delete globalThis.__openusage_plugin
     vi.resetModules()
+    vi.useRealTimers()
   })
 
   it("throws when auth missing", async () => {
@@ -235,6 +236,7 @@ describe("codex plugin", () => {
   })
 
   it("adds token lines from codex ccusage format and passes codex provider", async () => {
+    const plugin = await loadPlugin()
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-02-20T16:00:00.000Z"))
 
@@ -264,7 +266,6 @@ describe("codex plugin", () => {
     })
 
     try {
-      const plugin = await loadPlugin()
       const result = plugin.probe(ctx)
 
       const today = result.lines.find((l) => l.label === "Today")
@@ -470,6 +471,7 @@ describe("codex plugin", () => {
   })
 
   it("matches UTC timestamp day keys at month boundary (regression)", async () => {
+    const plugin = await loadPlugin()
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0))
     try {
@@ -488,7 +490,6 @@ describe("codex plugin", () => {
         data: { daily: [{ date: "2026-03-01T12:00:00Z", totalTokens: 10, costUSD: 0.1 }] },
       })
 
-      const plugin = await loadPlugin()
       const result = plugin.probe(ctx)
       const todayLine = result.lines.find((line) => line.label === "Today")
       expect(todayLine).toBeTruthy()
@@ -499,6 +500,7 @@ describe("codex plugin", () => {
   })
 
   it("matches UTC+9 timestamp day keys at month boundary (regression)", async () => {
+    const plugin = await loadPlugin()
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0))
     try {
@@ -517,7 +519,6 @@ describe("codex plugin", () => {
         data: { daily: [{ date: "2026-03-01T00:30:00+09:00", totalTokens: 20, costUSD: 0.2 }] },
       })
 
-      const plugin = await loadPlugin()
       const result = plugin.probe(ctx)
       const todayLine = result.lines.find((line) => line.label === "Today")
       expect(todayLine).toBeTruthy()
@@ -528,6 +529,7 @@ describe("codex plugin", () => {
   })
 
   it("matches UTC-8 timestamp day keys at day boundary (regression)", async () => {
+    const plugin = await loadPlugin()
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0))
     try {
@@ -546,7 +548,6 @@ describe("codex plugin", () => {
         data: { daily: [{ date: "2026-03-01T23:30:00-08:00", totalTokens: 30, costUSD: 0.3 }] },
       })
 
-      const plugin = await loadPlugin()
       const result = plugin.probe(ctx)
       const todayLine = result.lines.find((line) => line.label === "Today")
       expect(todayLine).toBeTruthy()
@@ -1063,6 +1064,7 @@ describe("codex plugin", () => {
   })
 
   it("formats large token totals using compact units", async () => {
+    const plugin = await loadPlugin()
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-12-15T12:00:00.000Z"))
     try {
@@ -1093,7 +1095,6 @@ describe("codex plugin", () => {
         },
       })
 
-      const plugin = await loadPlugin()
       const result = plugin.probe(ctx)
       const today = result.lines.find((line) => line.label === "Today")
       const last30 = result.lines.find((line) => line.label === "Last 30 Days")
