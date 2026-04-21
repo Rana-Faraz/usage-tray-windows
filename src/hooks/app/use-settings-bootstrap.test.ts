@@ -14,6 +14,7 @@ const {
   loadGlobalShortcutMock,
   loadMenubarIconStyleMock,
   loadPluginSettingsMock,
+  loadUsageHistoryMock,
   loadResetTimerDisplayModeMock,
   loadStartOnLoginMock,
   loadThemeModeMock,
@@ -33,6 +34,7 @@ const {
   loadGlobalShortcutMock: vi.fn(),
   loadMenubarIconStyleMock: vi.fn(),
   loadPluginSettingsMock: vi.fn(),
+  loadUsageHistoryMock: vi.fn(),
   loadResetTimerDisplayModeMock: vi.fn(),
   loadStartOnLoginMock: vi.fn(),
   loadThemeModeMock: vi.fn(),
@@ -75,12 +77,17 @@ vi.mock("@/lib/settings", () => ({
   savePluginSettings: savePluginSettingsMock,
 }))
 
+vi.mock("@/lib/usage-history", () => ({
+  loadUsageHistory: loadUsageHistoryMock,
+}))
+
 import { useSettingsBootstrap } from "@/hooks/app/use-settings-bootstrap"
 
 function createArgs() {
   return {
     setPluginSettings: vi.fn(),
     setPluginsMeta: vi.fn(),
+    setUsageHistory: vi.fn(),
     setAutoUpdateInterval: vi.fn(),
     setThemeMode: vi.fn(),
     setDisplayMode: vi.fn(),
@@ -108,6 +115,7 @@ describe("useSettingsBootstrap", () => {
     loadGlobalShortcutMock.mockReset()
     loadMenubarIconStyleMock.mockReset()
     loadPluginSettingsMock.mockReset()
+    loadUsageHistoryMock.mockReset()
     loadResetTimerDisplayModeMock.mockReset()
     loadStartOnLoginMock.mockReset()
     loadThemeModeMock.mockReset()
@@ -128,6 +136,7 @@ describe("useSettingsBootstrap", () => {
       },
     ])
     loadPluginSettingsMock.mockResolvedValue({ order: ["codex"], disabled: [] })
+    loadUsageHistoryMock.mockResolvedValue({})
     normalizePluginSettingsMock.mockImplementation((stored) => stored)
     arePluginSettingsEqualMock.mockReturnValue(true)
     loadAutoUpdateIntervalMock.mockResolvedValue(15)

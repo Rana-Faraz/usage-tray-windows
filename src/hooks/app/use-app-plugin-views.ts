@@ -3,8 +3,13 @@ import type { ActiveView, NavPlugin } from "@/components/side-nav"
 import type { PluginMeta } from "@/lib/plugin-types"
 import type { PluginSettings } from "@/lib/settings"
 import type { PluginState } from "@/hooks/app/types"
+import type { UsageHistory } from "@/lib/usage-history"
 
-export type DisplayPluginState = { meta: PluginMeta; disabledOverviewLabels: string[] } & PluginState
+export type DisplayPluginState = {
+  meta: PluginMeta
+  disabledOverviewLabels: string[]
+  usageHistory: import("@/lib/usage-history").UsageHistoryEntry[]
+} & PluginState
 
 type UseAppPluginViewsArgs = {
   activeView: ActiveView
@@ -12,6 +17,7 @@ type UseAppPluginViewsArgs = {
   pluginSettings: PluginSettings | null
   pluginsMeta: PluginMeta[]
   pluginStates: Record<string, PluginState>
+  usageHistory: UsageHistory
 }
 
 export function useAppPluginViews({
@@ -20,6 +26,7 @@ export function useAppPluginViews({
   pluginSettings,
   pluginsMeta,
   pluginStates,
+  usageHistory,
 }: UseAppPluginViewsArgs) {
   const displayPlugins = useMemo<DisplayPluginState[]>(() => {
     if (!pluginSettings) return []
@@ -33,10 +40,15 @@ export function useAppPluginViews({
         if (!meta) return null
         const state =
           pluginStates[id] ?? { data: null, loading: false, error: null, lastManualRefreshAt: null }
-        return { meta, ...state, disabledOverviewLabels: pluginSettings.disabledOverviewLabels?.[id] || [] }
+        return {
+          meta,
+          ...state,
+          usageHistory: usageHistory[id] ?? [],
+          disabledOverviewLabels: pluginSettings.disabledOverviewLabels?.[id] || [],
+        }
       })
       .filter((plugin): plugin is DisplayPluginState => Boolean(plugin))
-  }, [pluginSettings, pluginStates, pluginsMeta])
+  }, [pluginSettings, pluginStates, pluginsMeta, usageHistory])
 
   const navPlugins = useMemo<NavPlugin[]>(() => {
     if (!pluginSettings) return []

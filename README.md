@@ -28,6 +28,7 @@ If you don't want to install the binary, or you want to develop on the project, 
 UsageTray lives in your Windows tray and shows usage data for supported AI coding tools in a single popup panel.
 
 - One-glance usage visibility across supported providers
+- 7-day usage trend charts per provider
 - Automatic refresh on a configurable schedule
 - Global shortcut support
 - Single-popup tray UI

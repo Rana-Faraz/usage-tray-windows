@@ -110,6 +110,41 @@ describe("ProviderCard", () => {
     expect(screen.getByText("342 credits")).toBeInTheDocument()
   })
 
+  it("renders a 7 day trend chart when history is present", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-02-02T12:00:00.000Z"))
+
+    render(
+      <ProviderCard
+        name="Trend"
+        displayMode="used"
+        brandColor="#10b981"
+        usageHistory={[
+          {
+            day: "2026-02-01",
+            capturedAt: "2026-02-01T00:00:00.000Z",
+            label: "Session",
+            used: 25,
+            limit: 100,
+            format: { kind: "percent" },
+          },
+          {
+            day: "2026-02-02",
+            capturedAt: "2026-02-02T00:00:00.000Z",
+            label: "Session",
+            used: 50,
+            limit: 100,
+            format: { kind: "percent" },
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText("7d trend")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: /7 day used trend/i })).toBeInTheDocument()
+    vi.useRealTimers()
+  })
+
   it("renders quick links and opens URL", async () => {
     render(
       <ProviderCard

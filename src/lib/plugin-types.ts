@@ -1,3 +1,5 @@
+import type { UsageHistoryEntry } from "@/lib/usage-history"
+
 export type ProgressFormat =
   | { kind: "percent" }
   | { kind: "dollars" }
@@ -53,5 +55,6 @@ export type PluginDisplayState = {
   loading: boolean
   error: string | null
   lastManualRefreshAt: number | null
+  usageHistory?: UsageHistoryEntry[]
   disabledOverviewLabels?: string[]
 }

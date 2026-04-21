@@ -27,6 +27,8 @@ const state = vi.hoisted(() => ({
   saveGlobalShortcutMock: vi.fn(),
   loadStartOnLoginMock: vi.fn(),
   saveStartOnLoginMock: vi.fn(),
+  loadUsageHistoryMock: vi.fn(),
+  saveUsageHistoryMock: vi.fn(),
   autostartEnableMock: vi.fn(),
   autostartDisableMock: vi.fn(),
   autostartIsEnabledMock: vi.fn(),
@@ -242,6 +244,15 @@ vi.mock("@/lib/settings", async () => {
   }
 })
 
+vi.mock("@/lib/usage-history", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/usage-history")>("@/lib/usage-history")
+  return {
+    ...actual,
+    loadUsageHistory: state.loadUsageHistoryMock,
+    saveUsageHistory: state.saveUsageHistoryMock,
+  }
+})
+
 import { App } from "@/App"
 import { useAppPluginStore } from "@/stores/app-plugin-store"
 import { useAppPreferencesStore } from "@/stores/app-preferences-store"
@@ -278,6 +289,8 @@ describe("App", () => {
     state.saveGlobalShortcutMock.mockReset()
     state.loadStartOnLoginMock.mockReset()
     state.saveStartOnLoginMock.mockReset()
+    state.loadUsageHistoryMock.mockReset()
+    state.saveUsageHistoryMock.mockReset()
     state.autostartEnableMock.mockReset()
     state.autostartDisableMock.mockReset()
     state.autostartIsEnabledMock.mockReset()
@@ -316,6 +329,8 @@ describe("App", () => {
     state.saveGlobalShortcutMock.mockResolvedValue(undefined)
     state.loadStartOnLoginMock.mockResolvedValue(false)
     state.saveStartOnLoginMock.mockResolvedValue(undefined)
+    state.loadUsageHistoryMock.mockResolvedValue({})
+    state.saveUsageHistoryMock.mockResolvedValue(undefined)
     state.autostartEnableMock.mockResolvedValue(undefined)
     state.autostartDisableMock.mockResolvedValue(undefined)
     state.autostartIsEnabledMock.mockResolvedValue(false)
