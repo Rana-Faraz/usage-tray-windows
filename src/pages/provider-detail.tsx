@@ -31,6 +31,7 @@ export function ProviderDetailPage({
       name={plugin.meta.name}
       plan={plugin.data?.plan}
       links={plugin.meta.links}
+      brandColor={plugin.meta.brandColor}
       availabilityNote={getWindowsProviderAvailabilityNote(plugin)}
       showSeparator={false}
       loading={plugin.loading}
@@ -38,6 +39,7 @@ export function ProviderDetailPage({
       lines={plugin.data?.lines ?? []}
       skeletonLines={plugin.meta.lines}
       lastManualRefreshAt={plugin.lastManualRefreshAt}
+      usageHistory={plugin.usageHistory}
       onRetry={onRetry}
       scopeFilter="all"
       displayMode={displayMode}

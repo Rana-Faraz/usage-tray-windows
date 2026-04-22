@@ -33,6 +33,7 @@ export function OverviewPage({
           key={plugin.meta.id}
           name={plugin.meta.name}
           plan={plugin.data?.plan}
+          brandColor={plugin.meta.brandColor}
           availabilityNote={getWindowsProviderAvailabilityNote(plugin)}
           showSeparator={index < plugins.length - 1}
           loading={plugin.loading}
@@ -40,6 +41,7 @@ export function OverviewPage({
           lines={plugin.data?.lines ?? []}
           skeletonLines={plugin.meta.lines}
           lastManualRefreshAt={plugin.lastManualRefreshAt}
+          usageHistory={plugin.usageHistory}
           onRetry={onRetryPlugin ? () => onRetryPlugin(plugin.meta.id) : undefined}
           scopeFilter="overview"
           displayMode={displayMode}

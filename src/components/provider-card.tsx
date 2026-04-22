@@ -9,9 +9,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SkeletonLines } from "@/components/skeleton-lines"
 import { ProviderAvailabilityNote } from "@/components/provider-availability-note"
 import { PluginError } from "@/components/plugin-error"
+import { UsageTrendChart } from "@/components/usage-trend-chart"
 import { useNowTicker } from "@/hooks/use-now-ticker"
 import { REFRESH_COOLDOWN_MS, type DisplayMode, type ResetTimerDisplayMode } from "@/lib/settings"
 import type { ManifestLine, MetricLine, PluginLink } from "@/lib/plugin-types"
+import type { UsageHistoryEntry } from "@/lib/usage-history"
 import type { WindowsProviderAvailabilityNote } from "@/lib/windows-provider-support"
 import { groupLinesByType } from "@/lib/group-lines-by-type"
 import { clamp01, formatCountNumber, formatFixedPrecisionNumber } from "@/lib/utils"
@@ -33,6 +35,8 @@ interface ProviderCardProps {
   onRetry?: () => void
   scopeFilter?: "overview" | "all"
   displayMode: DisplayMode
+  brandColor?: string
+  usageHistory?: UsageHistoryEntry[]
   disabledOverviewLabels?: string[]
   resetTimerDisplayMode?: ResetTimerDisplayMode
   onResetTimerDisplayModeToggle?: () => void
@@ -97,8 +101,10 @@ export function ProviderCard({
   onRetry,
   scopeFilter = "all",
   displayMode,
+  brandColor,
   resetTimerDisplayMode = "relative",
   onResetTimerDisplayModeToggle,
+  usageHistory = [],
   disabledOverviewLabels = [],
 }: ProviderCardProps) {
   const cooldownRemainingMs = useMemo(() => {
@@ -258,6 +264,14 @@ export function ProviderCard({
 
         {!loading && !error && !availabilityNote?.suppressError && (
           <div className="space-y-4">
+            {usageHistory.length > 0 && (
+              <UsageTrendChart
+                history={usageHistory}
+                displayMode={displayMode}
+                brandColor={brandColor}
+                compact={scopeFilter === "overview"}
+              />
+            )}
             {groupLinesByType(filteredLines).map((group, gi) =>
               group.kind === "text" ? (
                 <div key={gi} className="space-y-1">

@@ -35,10 +35,12 @@ import {
   type ResetTimerDisplayMode,
   type ThemeMode,
 } from "@/lib/settings"
+import { loadUsageHistory, type UsageHistory } from "@/lib/usage-history"
 
 type UseSettingsBootstrapArgs = {
   setPluginSettings: (value: PluginSettings | null) => void
   setPluginsMeta: (value: PluginMeta[]) => void
+  setUsageHistory: (value: UsageHistory) => void
   setAutoUpdateInterval: (value: AutoUpdateIntervalMinutes) => void
   setThemeMode: (value: ThemeMode) => void
   setDisplayMode: (value: DisplayMode) => void
@@ -54,6 +56,7 @@ type UseSettingsBootstrapArgs = {
 export function useSettingsBootstrap({
   setPluginSettings,
   setPluginsMeta,
+  setUsageHistory,
   setAutoUpdateInterval,
   setThemeMode,
   setDisplayMode,
@@ -91,6 +94,13 @@ export function useSettingsBootstrap({
         const normalized = normalizePluginSettings(storedSettings, availablePlugins)
         if (!arePluginSettingsEqual(storedSettings, normalized)) {
           await savePluginSettings(normalized)
+        }
+
+        let storedUsageHistory: UsageHistory = {}
+        try {
+          storedUsageHistory = await loadUsageHistory()
+        } catch (error) {
+          console.error("Failed to load usage history:", error)
         }
 
         let storedInterval = DEFAULT_AUTO_UPDATE_INTERVAL
@@ -156,6 +166,7 @@ export function useSettingsBootstrap({
         if (isMounted) {
           setPluginSettings(normalized)
           setAutoUpdateInterval(storedInterval)
+          setUsageHistory(storedUsageHistory)
           setThemeMode(storedThemeMode)
           setDisplayMode(storedDisplayMode)
           setResetTimerDisplayMode(storedResetTimerDisplayMode)
@@ -198,6 +209,7 @@ export function useSettingsBootstrap({
     setResetTimerDisplayMode,
     setStartOnLogin,
     setThemeMode,
+    setUsageHistory,
     startBatch,
   ])
 

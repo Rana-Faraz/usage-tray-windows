@@ -27,6 +27,8 @@ const state = vi.hoisted(() => ({
   saveGlobalShortcutMock: vi.fn(),
   loadStartOnLoginMock: vi.fn(),
   saveStartOnLoginMock: vi.fn(),
+  loadUsageHistoryMock: vi.fn(),
+  saveUsageHistoryMock: vi.fn(),
   autostartEnableMock: vi.fn(),
   autostartDisableMock: vi.fn(),
   autostartIsEnabledMock: vi.fn(),
@@ -242,6 +244,15 @@ vi.mock("@/lib/settings", async () => {
   }
 })
 
+vi.mock("@/lib/usage-history", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/usage-history")>("@/lib/usage-history")
+  return {
+    ...actual,
+    loadUsageHistory: state.loadUsageHistoryMock,
+    saveUsageHistory: state.saveUsageHistoryMock,
+  }
+})
+
 import { App } from "@/App"
 import { useAppPluginStore } from "@/stores/app-plugin-store"
 import { useAppPreferencesStore } from "@/stores/app-preferences-store"
@@ -278,6 +289,8 @@ describe("App", () => {
     state.saveGlobalShortcutMock.mockReset()
     state.loadStartOnLoginMock.mockReset()
     state.saveStartOnLoginMock.mockReset()
+    state.loadUsageHistoryMock.mockReset()
+    state.saveUsageHistoryMock.mockReset()
     state.autostartEnableMock.mockReset()
     state.autostartDisableMock.mockReset()
     state.autostartIsEnabledMock.mockReset()
@@ -316,6 +329,8 @@ describe("App", () => {
     state.saveGlobalShortcutMock.mockResolvedValue(undefined)
     state.loadStartOnLoginMock.mockResolvedValue(false)
     state.saveStartOnLoginMock.mockResolvedValue(undefined)
+    state.loadUsageHistoryMock.mockResolvedValue({})
+    state.saveUsageHistoryMock.mockResolvedValue(undefined)
     state.autostartEnableMock.mockResolvedValue(undefined)
     state.autostartDisableMock.mockResolvedValue(undefined)
     state.autostartIsEnabledMock.mockResolvedValue(false)
@@ -404,6 +419,58 @@ describe("App", () => {
     await waitFor(() => expect(state.migrateLegacyTraySettingsMock).toHaveBeenCalled())
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(state.setSizeMock).toHaveBeenCalled()
+  })
+
+  it("keeps bootstrapped usage history when first probe result arrives during startup batch", async () => {
+    state.isTauriMock.mockReturnValue(true)
+    state.loadUsageHistoryMock.mockResolvedValue({
+      b: [{
+        day: "2026-04-20",
+        capturedAt: "2026-04-20T00:00:00.000Z",
+        label: "Requests",
+        used: 12,
+        limit: 100,
+        format: { kind: "count", suffix: "req" },
+      }],
+    })
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [
+          {
+            id: "a",
+            name: "Alpha",
+            iconUrl: "icon-a",
+            primaryCandidates: ["Requests"],
+            lines: [{ type: "progress", label: "Requests", scope: "overview" }],
+          },
+          {
+            id: "b",
+            name: "Beta",
+            iconUrl: "icon-b",
+            primaryCandidates: ["Requests"],
+            lines: [{ type: "progress", label: "Requests", scope: "overview" }],
+          },
+        ]
+      }
+      return null
+    })
+    state.startBatchMock.mockImplementation(async (ids?: string[]) => {
+      state.probeHandlers?.onResult({
+        providerId: "a",
+        displayName: "Alpha",
+        iconUrl: "icon-a",
+        lines: [{ type: "progress", label: "Requests", used: 40, limit: 100, format: { kind: "count", suffix: "req" } }],
+      })
+      return ids
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      const history = useAppPluginStore.getState().usageHistory
+      expect(history.b).toBeDefined()
+      expect(history.a).toBeDefined()
+    })
   })
 
   it("calls migrateLegacyTraySettings before loadMenubarIconStyle during bootstrap", async () => {
