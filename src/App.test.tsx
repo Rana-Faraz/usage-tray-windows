@@ -421,6 +421,58 @@ describe("App", () => {
     expect(state.setSizeMock).toHaveBeenCalled()
   })
 
+  it("keeps bootstrapped usage history when first probe result arrives during startup batch", async () => {
+    state.isTauriMock.mockReturnValue(true)
+    state.loadUsageHistoryMock.mockResolvedValue({
+      b: [{
+        day: "2026-04-20",
+        capturedAt: "2026-04-20T00:00:00.000Z",
+        label: "Requests",
+        used: 12,
+        limit: 100,
+        format: { kind: "count", suffix: "req" },
+      }],
+    })
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [
+          {
+            id: "a",
+            name: "Alpha",
+            iconUrl: "icon-a",
+            primaryCandidates: ["Requests"],
+            lines: [{ type: "progress", label: "Requests", scope: "overview" }],
+          },
+          {
+            id: "b",
+            name: "Beta",
+            iconUrl: "icon-b",
+            primaryCandidates: ["Requests"],
+            lines: [{ type: "progress", label: "Requests", scope: "overview" }],
+          },
+        ]
+      }
+      return null
+    })
+    state.startBatchMock.mockImplementation(async (ids?: string[]) => {
+      state.probeHandlers?.onResult({
+        providerId: "a",
+        displayName: "Alpha",
+        iconUrl: "icon-a",
+        lines: [{ type: "progress", label: "Requests", used: 40, limit: 100, format: { kind: "count", suffix: "req" } }],
+      })
+      return ids
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      const history = useAppPluginStore.getState().usageHistory
+      expect(history.b).toBeDefined()
+      expect(history.a).toBeDefined()
+    })
+  })
+
   it("calls migrateLegacyTraySettings before loadMenubarIconStyle during bootstrap", async () => {
     state.isTauriMock.mockReturnValue(true)
     render(<App />)

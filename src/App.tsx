@@ -97,6 +97,10 @@ function App() {
   }, [usageHistory])
 
   const usageHistorySaveQueueRef = useRef(Promise.resolve())
+  const setUsageHistoryAndRef = useCallback((nextHistory: typeof usageHistory) => {
+    usageHistoryRef.current = nextHistory
+    setUsageHistory(nextHistory)
+  }, [setUsageHistory])
 
   const handleProbeResult = useCallback((output: PluginOutput) => {
     scheduleProbeTrayUpdateRef.current()
@@ -112,15 +116,14 @@ function App() {
       providerId: output.providerId,
       entry,
     })
-    usageHistoryRef.current = nextHistory
-    setUsageHistory(nextHistory)
+    setUsageHistoryAndRef(nextHistory)
     usageHistorySaveQueueRef.current = usageHistorySaveQueueRef.current
       .catch(() => undefined)
       .then(() => saveUsageHistory(nextHistory))
       .catch((error) => {
         console.error("Failed to save usage history:", error)
       })
-  }, [setUsageHistory])
+  }, [setUsageHistoryAndRef])
 
   const {
     pluginStates,
@@ -155,7 +158,7 @@ function App() {
   const { applyStartOnLogin } = useSettingsBootstrap({
     setPluginSettings,
     setPluginsMeta,
-    setUsageHistory,
+    setUsageHistory: setUsageHistoryAndRef,
     setAutoUpdateInterval,
     setThemeMode,
     setDisplayMode,
