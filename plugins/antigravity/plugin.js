@@ -30,11 +30,15 @@
   }
 
   function stateDbPaths(ctx) {
-    var paths = ["~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb"]
+    var paths = [
+      "~/Library/Application Support/Antigravity IDE/User/globalStorage/state.vscdb",
+      "~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb"
+    ]
     if (isWindowsPlatform(ctx) && ctx.host.windows && typeof ctx.host.windows.knownPath === "function") {
       var appData = ctx.host.windows.knownPath("appData")
       if (appData) {
         paths.unshift(joinPath(appData, "Antigravity/User/globalStorage/state.vscdb"))
+        paths.unshift(joinPath(appData, "Antigravity IDE/User/globalStorage/state.vscdb"))
       }
     }
     return paths
@@ -100,9 +104,16 @@
         )
         var parsed = ctx.util.tryParseJson(rows)
         if (!parsed || !parsed.length || !parsed[0].value) continue
-        var auth = ctx.util.tryParseJson(parsed[0].value)
-        if (!auth || !auth.apiKey) continue
-        return auth.apiKey
+        var val = parsed[0].value
+        var auth = ctx.util.tryParseJson(val)
+        if (auth && auth.apiKey) return auth.apiKey
+        
+        // Fallback: the user or another tool might have injected the raw API key directly
+        if (typeof val === "string" && val.length > 10 && val.indexOf("{") !== 0) {
+          if (val.indexOf("apiKey:") === 0) return val.substring(7)
+          return val
+        }
+        continue
       } catch (e) {
         ctx.host.log.warn("failed to read auth from antigravity DB: " + String(e))
       }
@@ -114,6 +125,40 @@
     var dbs = stateDbPaths(ctx)
     for (var i = 0; i < dbs.length; i++) {
       try {
+        // Try Antigravity 2.0 oauthToken first
+        var rows2 = ctx.host.sqlite.query(
+          dbs[i],
+          "SELECT value FROM ItemTable WHERE key = 'antigravityUnifiedStateSync.oauthToken' LIMIT 1"
+        )
+        var parsed2 = ctx.util.tryParseJson(rows2)
+        if (parsed2 && parsed2.length && parsed2[0].value) {
+          var raw = ctx.base64.decode(parsed2[0].value)
+          var outer = readFields(raw)
+          // The whole structure is wrapped in field 1
+          if (outer[1] && outer[1].type === 2) {
+            var level1 = readFields(outer[1].data)
+            var sentinelKey = (level1[1] && level1[1].type === 2) ? level1[1].data : null
+            
+            // level1[1] is the sentinel key, level1[2] is the actual token data
+            if (level1[2] && level1[2].type === 2) {
+              var level2 = readFields(level1[2].data)
+              var l2_f1 = (level2[1] && level2[1].type === 2) ? level2[1].data : null
+              
+              var accessToken = l2_f1
+              var refreshToken = (level2[3] && level2[3].type === 2) ? level2[3].data : null
+              var expirySeconds = null
+              if (level2[4] && level2[4].type === 2) {
+                var ts = readFields(level2[4].data)
+                if (ts[1] && ts[1].type === 0) expirySeconds = ts[1].value
+              }
+              if (accessToken && accessToken.indexOf("{") !== 0) {
+                return { accessToken: accessToken, refreshToken: refreshToken, expirySeconds: expirySeconds }
+              }
+            }
+          }
+        }
+
+        // Fallback to Antigravity 1.0 format
         var rows = ctx.host.sqlite.query(
           dbs[i],
           "SELECT value FROM ItemTable WHERE key = 'jetskiStateSync.agentManagerInitState' LIMIT 1"
@@ -211,7 +256,7 @@
   function discoverLs(ctx) {
     return ctx.host.ls.discover({
       processName: lsProcessName(ctx),
-      markers: ["antigravity"],
+      markers: ["antigravity", "antigravity-ide"],
       csrfFlag: "--csrf_token",
       portFlag: "--extension_server_port",
     })
