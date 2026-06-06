@@ -6,6 +6,12 @@ const loadPlugin = async () => {
   return globalThis.__openusage_plugin
 }
 
+const OAUTH_TOKEN_KEY = "antigravityUnifiedStateSync.oauthToken"
+const OAUTH_TOKEN_SENTINEL = "oauthTokenInfoSentinelKey"
+const STATE_DB_V2 = "~/Library/Application Support/Antigravity IDE/User/globalStorage/state.vscdb"
+const STATE_DB_V1 = "~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb"
+const LOGIN_MESSAGE = "Start Antigravity or run `agy` and try again."
+
 // --- Fixtures ---
 
 function makeDiscovery(overrides) {
@@ -69,6 +75,7 @@ function makeUserStatusResponse(overrides) {
     if (overrides.planName !== undefined) base.userStatus.planStatus.planInfo.planName = overrides.planName
     if (overrides.configs !== undefined) base.userStatus.cascadeModelConfigData.clientModelConfigs = overrides.configs
     if (overrides.planStatus !== undefined) base.userStatus.planStatus = overrides.planStatus
+    if (overrides.userTier !== undefined) base.userStatus.userTier = overrides.userTier
   }
   return base
 }
@@ -93,9 +100,26 @@ function makeCloudCodeResponse(overrides) {
   )
 }
 
-function makeAuthStatusJson(overrides) {
-  return JSON.stringify(
-    Object.assign({ apiKey: "test-api-key-123", email: "user@example.com", name: "Test User" }, overrides)
+function makeAgyLoadResponse(overrides) {
+  return Object.assign(
+    {
+      paidTier: { name: "Google AI Pro" },
+      cloudaicompanionProject: "projects/openusage-agy",
+    },
+    overrides
+  )
+}
+
+function makeAgyQuotaResponse(overrides) {
+  return Object.assign(
+    {
+      buckets: [
+        { modelId: "gemini-3-pro", remainingFraction: 0.8, resetTime: "2026-02-08T10:00:00Z" },
+        { modelId: "gemini-3-flash", remainingFraction: 0.6, resetTime: "2026-02-08T10:00:00Z" },
+        { modelId: "claude-sonnet-4.5", remainingFraction: 0.4, resetTime: "2026-02-08T10:00:00Z" },
+      ],
+    },
+    overrides
   )
 }
 
@@ -109,42 +133,55 @@ function setupLsMock(ctx, discovery, responseBody) {
   })
 }
 
-function setupSqliteMock(ctx, authJson, protoBase64) {
+function setupSqliteMock(ctx, oauthEnvelopeB64) {
   ctx.host.sqlite.query.mockImplementation((db, sql) => {
-    if (sql.includes("agentManagerInitState") && protoBase64) {
-      return JSON.stringify([{ value: protoBase64 }])
-    }
-    if (sql.includes("antigravityAuthStatus") && authJson) {
-      return JSON.stringify([{ value: authJson }])
+    if (sql.includes(OAUTH_TOKEN_KEY) && oauthEnvelopeB64) {
+      return JSON.stringify([{ value: oauthEnvelopeB64 }])
     }
     return "[]"
   })
 }
 
-function makeProtobufBase64(ctx, accessToken, refreshToken, expirySeconds) {
-  function encodeVarint(n) {
-    var bytes = ""
-    while (n > 0x7f) {
-      bytes += String.fromCharCode((n & 0x7f) | 0x80)
-      n = Math.floor(n / 128)
-    }
-    bytes += String.fromCharCode(n & 0x7f)
-    return bytes
+function setupSqliteByPath(ctx, valuesByPath) {
+  ctx.host.sqlite.query.mockImplementation((db, sql) => {
+    if (!sql.includes(OAUTH_TOKEN_KEY)) return "[]"
+    var value = valuesByPath[String(db)]
+    if (value instanceof Error) throw value
+    if (value) return JSON.stringify([{ value: value }])
+    return "[]"
+  })
+}
+
+function encodeVarint(n) {
+  var bytes = ""
+  while (n > 0x7f) {
+    bytes += String.fromCharCode((n & 0x7f) | 0x80)
+    n = Math.floor(n / 128)
   }
-  function encodeField(fieldNum, wireType, data) {
-    var tag = encodeVarint(fieldNum * 8 + wireType)
-    if (wireType === 2) return tag + encodeVarint(data.length) + data
-    if (wireType === 0) return tag + encodeVarint(data)
-    return ""
-  }
+  bytes += String.fromCharCode(n & 0x7f)
+  return bytes
+}
+
+function encodeField(fieldNum, wireType, data) {
+  var tag = encodeVarint(fieldNum * 8 + wireType)
+  if (wireType === 2) return tag + encodeVarint(data.length) + data
+  if (wireType === 0) return tag + encodeVarint(data)
+  return ""
+}
+
+function makeOAuthSentinelB64(ctx, opts) {
+  opts = opts || {}
   var inner = ""
-  if (accessToken) inner += encodeField(1, 2, accessToken)
-  if (refreshToken) inner += encodeField(3, 2, refreshToken)
-  if (expirySeconds !== null && expirySeconds !== undefined) {
-    var tsMsg = encodeField(1, 0, expirySeconds)
+  if (opts.accessToken) inner += encodeField(1, 2, opts.accessToken)
+  if (opts.refreshToken) inner += encodeField(3, 2, opts.refreshToken)
+  if (opts.expirySeconds !== null && opts.expirySeconds !== undefined) {
+    var tsMsg = encodeField(1, 0, opts.expirySeconds)
     inner += encodeField(4, 2, tsMsg)
   }
-  var outer = encodeField(6, 2, inner)
+  var innerB64 = ctx.base64.encode(inner)
+  var payload = encodeField(1, 2, innerB64)
+  var wrapper = encodeField(1, 2, OAUTH_TOKEN_SENTINEL) + encodeField(2, 2, payload)
+  var outer = encodeField(1, 2, wrapper)
   return ctx.base64.encode(outer)
 }
 
@@ -160,7 +197,7 @@ describe("antigravity plugin", () => {
     const ctx = makeCtx()
     ctx.host.ls.discover.mockReturnValue(null)
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
   })
 
   it("throws when no working port found and no DB credentials", async () => {
@@ -170,7 +207,7 @@ describe("antigravity plugin", () => {
       throw new Error("connection refused")
     })
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
   })
 
   it("throws when both GetUserStatus and GetCommandModelConfigs fail", async () => {
@@ -183,7 +220,59 @@ describe("antigravity plugin", () => {
       return { status: 500, bodyText: "" }
     })
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+  })
+
+  it("discovers new Antigravity process names and agy fallback", async () => {
+    const ctx = makeCtx()
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    const plugin = await loadPlugin()
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+
+    expect(ctx.host.ls.discover).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      processName: "language_server",
+      markers: ["antigravity", "antigravity-ide"],
+      csrfFlag: "--csrf_token",
+    }))
+    expect(ctx.host.ls.discover).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      processName: "agy",
+      markers: [],
+      csrfFlag: "",
+    }))
+  })
+
+  it("returns models from the agy local server when Antigravity is not running", async () => {
+    const ctx = makeCtx()
+    ctx.host.ls.discover.mockImplementation((opts) => {
+      if (opts.processName === "agy") return makeDiscovery({ csrf: "", ports: [43001] })
+      return null
+    })
+
+    let capturedCsrf = null
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      if (url.includes("GetUnleashData")) {
+        capturedCsrf = opts.headers["x-codeium-csrf-token"]
+        return { status: 200, bodyText: "{}" }
+      }
+      if (url.includes("GetUserStatus")) {
+        return {
+          status: 200,
+          bodyText: JSON.stringify(makeUserStatusResponse({
+            userTier: { name: "Google AI Pro" },
+          })),
+        }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(capturedCsrf).toBe("")
+    expect(result.plan).toBe("Google AI Pro")
+    expect(result.lines.map((l) => l.label)).toEqual(["Flow Credits", "Prompt Credits", "Gemini Pro", "Gemini Flash", "Claude"])
   })
 
   it("returns models + plan from GetUserStatus", async () => {
@@ -195,42 +284,12 @@ describe("antigravity plugin", () => {
     const plugin = await loadPlugin()
     const result = plugin.probe(ctx)
 
+    // No userTier in default fixture → falls back to planInfo.planName
     expect(result.plan).toBe("Pro")
 
     // Model lines exist — 3 pool lines
     const labels = result.lines.map((l) => l.label)
-    expect(labels).toEqual(["Gemini Pro", "Gemini Flash", "Claude"])
-  })
-
-  it("uses Windows AppData DB lookup and Windows LS metadata on windows", async () => {
-    const ctx = makeCtx()
-    ctx.app.platform = "windows"
-    ctx.host.windows.knownPath.mockReturnValue("C:/Users/test/AppData/Roaming")
-    ctx.host.sqlite.query.mockImplementation((db, sql) => {
-      expect(String(db)).toBe("C:/Users/test/AppData/Roaming/Antigravity/User/globalStorage/state.vscdb")
-      if (String(sql).includes("antigravityAuthStatus")) {
-        return JSON.stringify([{ value: makeAuthStatusJson() }])
-      }
-      return "[]"
-    })
-    ctx.host.ls.discover.mockImplementation((opts) => {
-      expect(opts.processName).toBe("language_server_windows_x64")
-      return makeDiscovery()
-    })
-    ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("GetUnleashData")) {
-        const body = JSON.parse(String(opts.bodyText))
-        expect(body.context.properties.os).toBe("windows")
-        return { status: 200, bodyText: "{}" }
-      }
-      return { status: 200, bodyText: JSON.stringify(makeUserStatusResponse({ planName: "Windows" })) }
-    })
-
-    const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(result.plan).toBe("Windows")
-    expect(ctx.host.windows.knownPath).toHaveBeenCalledWith("appData")
+    expect(labels).toEqual(["Flow Credits", "Prompt Credits", "Gemini Pro", "Gemini Flash", "Claude"])
   })
 
   it("deduplicates models by normalized label (keeps worst-case fraction)", async () => {
@@ -259,7 +318,7 @@ describe("antigravity plugin", () => {
 
     const labels = result.lines.map((l) => l.label)
 
-    expect(labels).toEqual(["Gemini Pro", "Gemini Flash", "Claude"])
+    expect(labels).toEqual(["Flow Credits", "Prompt Credits", "Gemini Pro", "Gemini Flash", "Claude"])
   })
 
   it("falls back to GetCommandModelConfigs when GetUserStatus fails", async () => {
@@ -381,8 +440,10 @@ describe("antigravity plugin", () => {
     const result = plugin.probe(ctx)
     expect(result).toBeTruthy()
     const labels = result.lines.map((l) => l.label)
-    expect(labels).toEqual(["Gemini Pro", "Claude"])
-    expect(result.lines.every((l) => l.used === 100)).toBe(true)
+    expect(labels).toEqual(["Flow Credits", "Prompt Credits", "Gemini Pro", "Claude"])
+    // Only verify that model lines are 100% used, since prompt/flow credits used values are count-based (50000-500=49500 used out of 50000 limit, not 100%)
+    const modelLines = result.lines.filter(l => l.label !== "Flow Credits" && l.label !== "Prompt Credits")
+    expect(modelLines.every((l) => l.used === 100)).toBe(true)
   })
 
   it("skips configs with missing or empty labels", async () => {
@@ -399,8 +460,8 @@ describe("antigravity plugin", () => {
 
     const plugin = await loadPlugin()
     const result = plugin.probe(ctx)
-    expect(result.lines.length).toBe(1)
-    expect(result.lines[0].label).toBe("Gemini Pro")
+    expect(result.lines.length).toBe(3)
+    expect(result.lines[2].label).toBe("Gemini Pro")
   })
 
   it("includes resetsAt on model lines", async () => {
@@ -480,35 +541,7 @@ describe("antigravity plugin", () => {
     ])
   })
 
-  it("includes apiKey in LS metadata when DB has credentials", async () => {
-    const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson())
-    const discovery = makeDiscovery()
-    ctx.host.ls.discover.mockReturnValue(discovery)
-
-    let capturedMetadata = null
-    ctx.host.http.request.mockImplementation((opts) => {
-      const url = String(opts.url)
-      if (url.includes("GetUnleashData")) {
-        return { status: 200, bodyText: "{}" }
-      }
-      if (url.includes("GetUserStatus")) {
-        const body = JSON.parse(opts.bodyText)
-        capturedMetadata = body.metadata
-        return { status: 200, bodyText: JSON.stringify(makeUserStatusResponse()) }
-      }
-      return { status: 200, bodyText: "{}" }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-
-    expect(capturedMetadata).toBeTruthy()
-    expect(capturedMetadata.apiKey).toBe("test-api-key-123")
-    expect(capturedMetadata.ideName).toBe("antigravity")
-  })
-
-  it("works without apiKey when SQLite returns empty", async () => {
+  it("never sends apiKey in LS metadata (unified schema has no apiKey)", async () => {
     const ctx = makeCtx()
     const discovery = makeDiscovery()
     const response = makeUserStatusResponse()
@@ -539,7 +572,7 @@ describe("antigravity plugin", () => {
   it("falls back to Cloud Code API when LS is not available", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -559,10 +592,135 @@ describe("antigravity plugin", () => {
     expect(labels).toContain("Claude")
   })
 
-  it("Cloud Code sends correct Authorization header with proto token", async () => {
+  it("tries Antigravity IDE SQLite credentials before legacy Antigravity credentials", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.proto-token", "1//refresh", futureExpiry))
+    setupSqliteByPath(ctx, {
+      [STATE_DB_V2]: makeOAuthSentinelB64(ctx, { accessToken: "ya29.v2-token", refreshToken: "1//v2", expirySeconds: futureExpiry }),
+      [STATE_DB_V1]: makeOAuthSentinelB64(ctx, { accessToken: "ya29.v1-token", refreshToken: "1//v1", expirySeconds: futureExpiry }),
+    })
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    const capturedAuths = []
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("fetchAvailableModels")) {
+        capturedAuths.push(opts.headers.Authorization)
+        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    plugin.probe(ctx)
+
+    expect(ctx.host.sqlite.query.mock.calls.map((call) => call[0])).toEqual([STATE_DB_V2, STATE_DB_V1])
+    expect(capturedAuths[0]).toBe("Bearer ya29.v2-token")
+  })
+
+  it("falls back to legacy SQLite credentials when the new path has no usable token", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteByPath(ctx, {
+      [STATE_DB_V2]: "not-valid-protobuf!!!",
+      [STATE_DB_V1]: makeOAuthSentinelB64(ctx, { accessToken: "ya29.v1-token", refreshToken: "1//v1", expirySeconds: futureExpiry }),
+    })
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    let capturedAuth = null
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("fetchAvailableModels")) {
+        capturedAuth = opts.headers.Authorization
+        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    plugin.probe(ctx)
+
+    expect(capturedAuth).toBe("Bearer ya29.v1-token")
+  })
+
+  it("uses the agy keychain account when no local server or SQLite credentials work", async () => {
+    const ctx = makeCtx()
+    setupSqliteMock(ctx, null)
+    ctx.host.ls.discover.mockReturnValue(null)
+    ctx.host.keychain.readGenericPassword.mockImplementation((service, account) => {
+      if (service === "gemini" && account === "antigravity") {
+        return "go-keyring-base64:" + ctx.base64.encode(JSON.stringify({
+          tokens: { access_token: "agy-keychain-token" },
+        }))
+      }
+      throw new Error("unexpected keychain lookup")
+    })
+
+    const called = []
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      called.push({ url, auth: opts.headers.Authorization, userAgent: opts.headers["User-Agent"], body: opts.bodyText })
+      if (url.includes("loadCodeAssist")) {
+        return { status: 200, bodyText: JSON.stringify(makeAgyLoadResponse()) }
+      }
+      if (url.includes("retrieveUserQuota")) {
+        return { status: 200, bodyText: JSON.stringify(makeAgyQuotaResponse()) }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(ctx.host.keychain.readGenericPassword).toHaveBeenCalledWith("gemini", "antigravity")
+    expect(called.every((call) => call.auth === "Bearer agy-keychain-token")).toBe(true)
+    expect(called.every((call) => call.userAgent === "agy")).toBe(true)
+    expect(called.map((call) => call.url)).toEqual([
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+    ])
+    expect(result.plan).toBe("Google AI Pro")
+    expect(result.lines.map((l) => l.label)).toEqual(["Gemini Pro", "Gemini Flash", "Claude"])
+  })
+
+  it("tries agy Cloud Code even when the keychain token matches a SQLite token", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "same-token", expirySeconds: futureExpiry }))
+    ctx.host.ls.discover.mockReturnValue(null)
+    ctx.host.keychain.readGenericPassword.mockImplementation((service, account) => {
+      if (service === "gemini" && account === "antigravity") {
+        return "go-keyring-base64:" + ctx.base64.encode(JSON.stringify({
+          tokens: { access_token: "same-token" },
+        }))
+      }
+      return null
+    })
+
+    let agyCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      if (url.includes("fetchAvailableModels")) return { status: 500, bodyText: "" }
+      if (url.includes("loadCodeAssist")) {
+        agyCalls += 1
+        return { status: 200, bodyText: JSON.stringify(makeAgyLoadResponse()) }
+      }
+      if (url.includes("retrieveUserQuota")) {
+        agyCalls += 1
+        return { status: 200, bodyText: JSON.stringify(makeAgyQuotaResponse()) }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(result.plan).toBe("Google AI Pro")
+    expect(agyCalls).toBe(2)
+  })
+
+  it("Cloud Code sends correct Authorization header with DB token", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.proto-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     let capturedHeaders = null
@@ -586,7 +744,7 @@ describe("antigravity plugin", () => {
   it("Cloud Code returns null on 401/403 (invalid token, no refresh)", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.bad-token", null, futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.bad-token", refreshToken: null, expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -598,13 +756,13 @@ describe("antigravity plugin", () => {
     })
 
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
   })
 
   it("Cloud Code tries multiple base URLs", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     const calledUrls = []
@@ -632,7 +790,7 @@ describe("antigravity plugin", () => {
   it("Cloud Code correctly parses model quota response", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -669,22 +827,23 @@ describe("antigravity plugin", () => {
     ctx.host.ls.discover.mockReturnValue(null)
 
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
     expect(ctx.host.http.request).not.toHaveBeenCalled()
   })
 
   it("LS takes priority over Cloud Code when both available", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     const discovery = makeDiscovery()
     const response = makeUserStatusResponse()
     setupLsMock(ctx, discovery, response)
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
 
     const plugin = await loadPlugin()
     const result = plugin.probe(ctx)
 
+    // No userTier in default fixture → falls back to planInfo.planName
     expect(result.plan).toBe("Pro")
     const calls = ctx.host.http.request.mock.calls.map((c) => String(c[0].url))
     const ccCalls = calls.filter((u) => u.includes("fetchAvailableModels"))
@@ -694,7 +853,7 @@ describe("antigravity plugin", () => {
   it("Cloud Code treats models without quotaInfo as depleted (100% used)", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -731,8 +890,8 @@ describe("antigravity plugin", () => {
   it("decodes protobuf tokens from SQLite", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.test-access", "1//refresh-token", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-access", refreshToken: "1//refresh-token", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
 
     let capturedAuth = null
@@ -752,52 +911,30 @@ describe("antigravity plugin", () => {
     expect(result.lines.length).toBeGreaterThan(0)
   })
 
-  it("handles missing protobuf data gracefully (falls back to apiKey)", async () => {
+  it("throws when unified oauth envelope is missing and no cache", async () => {
     const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson())
+    setupSqliteMock(ctx, null)
     ctx.host.ls.discover.mockReturnValue(null)
 
-    let capturedAuth = null
-    ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("fetchAvailableModels")) {
-        capturedAuth = opts.headers.Authorization
-        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
-      }
-      return { status: 500, bodyText: "" }
-    })
-
     const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(capturedAuth).toBe("Bearer test-api-key-123")
-    expect(result.lines.length).toBeGreaterThan(0)
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+    expect(ctx.host.http.request).not.toHaveBeenCalled()
   })
 
-  it("handles corrupt protobuf base64 gracefully (falls back to apiKey)", async () => {
+  it("throws when unified oauth envelope is corrupt and no cache", async () => {
     const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson(), "not-valid-protobuf!!!")
+    setupSqliteMock(ctx, "not-valid-protobuf!!!")
     ctx.host.ls.discover.mockReturnValue(null)
 
-    let capturedAuth = null
-    ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("fetchAvailableModels")) {
-        capturedAuth = opts.headers.Authorization
-        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
-      }
-      return { status: 500, bodyText: "" }
-    })
-
     const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(capturedAuth).toBe("Bearer test-api-key-123")
-    expect(result.lines.length).toBeGreaterThan(0)
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+    expect(ctx.host.http.request).not.toHaveBeenCalled()
   })
 
   it("handles protobuf with no refresh_token or expiry", async () => {
     const ctx = makeCtx()
-    const protoB64 = makeProtobufBase64(ctx, "ya29.access-only", null, null)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.access-only", refreshToken: null, expirySeconds: null })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
 
     let capturedAuth = null
@@ -818,8 +955,8 @@ describe("antigravity plugin", () => {
   it("sends correct form-urlencoded POST to Google OAuth", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.expired", "1//my-refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.expired", refreshToken: "1//my-refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
 
     let oauthBody = null
@@ -853,8 +990,8 @@ describe("antigravity plugin", () => {
   it("throws when all tokens fail and refresh returns invalid_grant", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.expired", "1//bad-refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.expired", refreshToken: "1//bad-refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -869,15 +1006,21 @@ describe("antigravity plugin", () => {
     })
 
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
   })
 
-  it("tries proto token first, then apiKey on auth failure", async () => {
+  it("tries DB token first, then cached on auth failure", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.proto-first", "1//refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.proto-first", refreshToken: "1//refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
+
+    const cachePath = ctx.app.pluginDataDir + "/auth.json"
+    ctx.host.fs.writeText(cachePath, JSON.stringify({
+      accessToken: "ya29.cached",
+      expiresAtMs: Date.now() + 3600000,
+    }))
 
     const capturedTokens = []
     ctx.host.http.request.mockImplementation((opts) => {
@@ -896,16 +1039,22 @@ describe("antigravity plugin", () => {
     const result = plugin.probe(ctx)
 
     expect(capturedTokens[0]).toBe("Bearer ya29.proto-first")
-    expect(capturedTokens[capturedTokens.length - 1]).toBe("Bearer test-api-key-123")
+    expect(capturedTokens[capturedTokens.length - 1]).toBe("Bearer ya29.cached")
     expect(result.lines.length).toBeGreaterThan(0)
   })
 
   it("tries both tokens before refreshing", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.both-fail", "1//refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.both-fail", refreshToken: "1//refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
+
+    const cachePath = ctx.app.pluginDataDir + "/auth.json"
+    ctx.host.fs.writeText(cachePath, JSON.stringify({
+      accessToken: "ya29.cached-also-bad",
+      expiresAtMs: Date.now() + 3600000,
+    }))
 
     const capturedTokens = []
     let refreshCalled = false
@@ -930,17 +1079,23 @@ describe("antigravity plugin", () => {
 
     expect(refreshCalled).toBe(true)
     expect(capturedTokens.filter((t) => t === "Bearer ya29.both-fail").length).toBeGreaterThan(0)
-    expect(capturedTokens.filter((t) => t === "Bearer test-api-key-123").length).toBeGreaterThan(0)
+    expect(capturedTokens.filter((t) => t === "Bearer ya29.cached-also-bad").length).toBeGreaterThan(0)
     expect(capturedTokens[capturedTokens.length - 1]).toBe("Bearer ya29.refreshed")
     expect(result.lines.length).toBeGreaterThan(0)
   })
 
-  it("deduplicates identical tokens", async () => {
+  it("deduplicates DB access token and identical cached token", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.same-token", "1//refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson({ apiKey: "ya29.same-token" }), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.same-token", refreshToken: "1//refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
+
+    const cachePath = ctx.app.pluginDataDir + "/auth.json"
+    ctx.host.fs.writeText(cachePath, JSON.stringify({
+      accessToken: "ya29.same-token",
+      expiresAtMs: Date.now() + 3600000,
+    }))
 
     const capturedTokens = []
     ctx.host.http.request.mockImplementation((opts) => {
@@ -966,31 +1121,11 @@ describe("antigravity plugin", () => {
     expect(result.lines.length).toBeGreaterThan(0)
   })
 
-  it("uses apiKey as only token when proto data unavailable", async () => {
-    const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson())
-    ctx.host.ls.discover.mockReturnValue(null)
-
-    let capturedAuth = null
-    ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("fetchAvailableModels")) {
-        capturedAuth = opts.headers.Authorization
-        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
-      }
-      return { status: 500, bodyText: "" }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-
-    expect(capturedAuth).toBe("Bearer test-api-key-123")
-  })
-
   it("caches refreshed token to pluginDataDir", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.will-fail", "1//refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.will-fail", refreshToken: "1//refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -1017,9 +1152,9 @@ describe("antigravity plugin", () => {
     expect(cached.expiresAtMs).toBeGreaterThan(Date.now())
   })
 
-  it("uses cached token before falling back to apiKey", async () => {
+  it("uses cached token when no DB access token", async () => {
     const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson())
+    setupSqliteMock(ctx, null)
     ctx.host.ls.discover.mockReturnValue(null)
 
     const cachePath = ctx.app.pluginDataDir + "/auth.json"
@@ -1043,9 +1178,9 @@ describe("antigravity plugin", () => {
     expect(capturedTokens[0]).toBe("Bearer ya29.cached-token")
   })
 
-  it("skips expired cached token", async () => {
+  it("throws when cached token is expired and no DB tokens", async () => {
     const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson())
+    setupSqliteMock(ctx, null)
     ctx.host.ls.discover.mockReturnValue(null)
 
     const cachePath = ctx.app.pluginDataDir + "/auth.json"
@@ -1054,31 +1189,25 @@ describe("antigravity plugin", () => {
       expiresAtMs: Date.now() - 1000,
     }))
 
-    let capturedAuth = null
-    ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("fetchAvailableModels")) {
-        capturedAuth = opts.headers.Authorization
-        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
-      }
-      return { status: 500, bodyText: "" }
-    })
-
     const plugin = await loadPlugin()
-    plugin.probe(ctx)
-
-    expect(capturedAuth).toBe("Bearer test-api-key-123")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+    expect(ctx.host.http.request).not.toHaveBeenCalled()
   })
 
-  it("skips expired proto token and falls back to next token", async () => {
+  it("skips expired DB access token and falls through to refresh", async () => {
     const ctx = makeCtx()
     const pastExpiry = Math.floor(Date.now() / 1000) - 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.expired-proto-token", "1//refresh", pastExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.expired-proto-token", refreshToken: "1//refresh", expirySeconds: pastExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
-    let capturedAuth = null
+    const capturedAuths = []
     ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("fetchAvailableModels")) {
-        capturedAuth = opts.headers.Authorization
+      const url = String(opts.url)
+      if (url.includes("oauth2.googleapis.com")) {
+        return { status: 200, bodyText: JSON.stringify({ access_token: "ya29.refreshed" }) }
+      }
+      if (url.includes("fetchAvailableModels")) {
+        capturedAuths.push(opts.headers.Authorization)
         return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
       }
       return { status: 500, bodyText: "" }
@@ -1087,36 +1216,28 @@ describe("antigravity plugin", () => {
     const plugin = await loadPlugin()
     plugin.probe(ctx)
 
-    expect(capturedAuth).toBe("Bearer test-api-key-123")
+    // Expired DB token must NOT be sent. The refreshed token is used instead.
+    expect(capturedAuths).not.toContain("Bearer ya29.expired-proto-token")
+    expect(capturedAuths[0]).toBe("Bearer ya29.refreshed")
   })
 
-  it("handles missing/corrupt cache file gracefully", async () => {
+  it("throws when cache file is corrupt and no DB tokens", async () => {
     const ctx = makeCtx()
-    setupSqliteMock(ctx, makeAuthStatusJson())
+    setupSqliteMock(ctx, null)
     ctx.host.ls.discover.mockReturnValue(null)
 
     const cachePath = ctx.app.pluginDataDir + "/auth.json"
     ctx.host.fs.writeText(cachePath, "{bad json")
 
-    let capturedAuth = null
-    ctx.host.http.request.mockImplementation((opts) => {
-      if (String(opts.url).includes("fetchAvailableModels")) {
-        capturedAuth = opts.headers.Authorization
-        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
-      }
-      return { status: 500, bodyText: "" }
-    })
-
     const plugin = await loadPlugin()
-    plugin.probe(ctx)
-
-    expect(capturedAuth).toBe("Bearer test-api-key-123")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+    expect(ctx.host.http.request).not.toHaveBeenCalled()
   })
 
   it("Cloud Code skips models with isInternal flag", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test", "1//r", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test", refreshToken: "1//r", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -1154,7 +1275,7 @@ describe("antigravity plugin", () => {
   it("Cloud Code skips models with empty or missing displayName", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test", "1//r", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test", refreshToken: "1//r", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -1194,7 +1315,7 @@ describe("antigravity plugin", () => {
   it("Cloud Code skips blacklisted model IDs", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test", "1//r", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test", refreshToken: "1//r", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -1235,7 +1356,7 @@ describe("antigravity plugin", () => {
   it("Cloud Code keeps non-blacklisted models with valid displayName", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test", "1//r", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test", refreshToken: "1//r", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     ctx.host.http.request.mockImplementation((opts) => {
@@ -1301,22 +1422,23 @@ describe("antigravity plugin", () => {
     const result = plugin.probe(ctx)
 
     const labels = result.lines.map((l) => l.label)
-    expect(labels).toEqual(["Gemini Pro", "Claude"])
+    expect(labels).toEqual(["Flow Credits", "Prompt Credits", "Gemini Pro", "Claude"])
   })
 
-  it("LS still takes priority over Cloud Code with proto tokens (no regression)", async () => {
+  it("LS still takes priority over Cloud Code with DB tokens (no regression)", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    const protoB64 = makeProtobufBase64(ctx, "ya29.proto-token", "1//refresh", futureExpiry)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    const protoB64 = makeOAuthSentinelB64(ctx, { accessToken: "ya29.proto-token", refreshToken: "1//refresh", expirySeconds: futureExpiry })
+    setupSqliteMock(ctx, protoB64)
     const discovery = makeDiscovery()
     const response = makeUserStatusResponse()
     setupLsMock(ctx, discovery, response)
-    setupSqliteMock(ctx, makeAuthStatusJson(), protoB64)
+    setupSqliteMock(ctx, protoB64)
 
     const plugin = await loadPlugin()
     const result = plugin.probe(ctx)
 
+    // No userTier in default fixture → falls back to planInfo.planName
     expect(result.plan).toBe("Pro")
     const calls = ctx.host.http.request.mock.calls.map((c) => String(c[0].url))
     expect(calls.filter((u) => u.includes("fetchAvailableModels")).length).toBe(0)
@@ -1326,7 +1448,7 @@ describe("antigravity plugin", () => {
   it("throws when Cloud Code returns no models", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
     ctx.host.http.request.mockImplementation((opts) => {
       if (String(opts.url).includes("fetchAvailableModels")) {
@@ -1336,13 +1458,13 @@ describe("antigravity plugin", () => {
     })
 
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
   })
 
   it("handles refresh response missing access_token", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.will-fail", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.will-fail", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     let oauthCalls = 0
@@ -1359,14 +1481,14 @@ describe("antigravity plugin", () => {
     })
 
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Start Antigravity and try again.")
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
     expect(oauthCalls).toBe(1)
   })
 
   it("continues to next Cloud Code base URL after non-2xx response", async () => {
     const ctx = makeCtx()
     const futureExpiry = Math.floor(Date.now() / 1000) + 3600
-    setupSqliteMock(ctx, makeAuthStatusJson(), makeProtobufBase64(ctx, "ya29.test-token", "1//refresh", futureExpiry))
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
     ctx.host.ls.discover.mockReturnValue(null)
 
     let ccCalls = 0
@@ -1383,5 +1505,247 @@ describe("antigravity plugin", () => {
     const result = plugin.probe(ctx)
     expect(result.lines.length).toBeGreaterThan(0)
     expect(ccCalls).toBe(2)
+  })
+
+  it("continues to next Cloud Code base URL after a 200 with invalid JSON", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.test-token", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    let ccCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("fetchAvailableModels")) {
+        ccCalls += 1
+        if (ccCalls === 1) return { status: 200, bodyText: "{bad json" }
+        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    expect(result.lines.length).toBeGreaterThan(0)
+    expect(ccCalls).toBe(2)
+  })
+
+  it("prefers userTier.name over legacy planInfo.planName for Ultra subscribers", async () => {
+    const ctx = makeCtx()
+    const discovery = makeDiscovery()
+    const response = makeUserStatusResponse({
+      userTier: {
+        id: "g1-ultra-tier",
+        name: "Google AI Ultra",
+        description: "Google AI Ultra",
+        upgradeSubscriptionText: "You are subscribed to the best plan.",
+      },
+    })
+    setupLsMock(ctx, discovery, response)
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(result.plan).toBe("Google AI Ultra")
+    const labels = result.lines.map((l) => l.label)
+    expect(labels).toEqual(["Flow Credits", "Prompt Credits", "Gemini Pro", "Gemini Flash", "Claude"])
+  })
+
+  it("falls back to planInfo.planName when userTier is absent", async () => {
+    const ctx = makeCtx()
+    const discovery = makeDiscovery()
+    const response = makeUserStatusResponse()  // no userTier override
+    setupLsMock(ctx, discovery, response)
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(result.plan).toBe("Pro")
+  })
+
+  it("falls back to planInfo.planName when userTier.name is empty", async () => {
+    const ctx = makeCtx()
+    const discovery = makeDiscovery()
+    const response = makeUserStatusResponse({
+      userTier: { id: "g1-pro-tier", name: "" },
+    })
+    setupLsMock(ctx, discovery, response)
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(result.plan).toBe("Pro")
+  })
+
+  // --- Regression tests for unified-schema bug fixes ---
+
+  it("refresh-token-only state (no access token, no cache) refreshes and succeeds", async () => {
+    const ctx = makeCtx()
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: null, refreshToken: "1//only-refresh", expirySeconds: null }))
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    const capturedAuths = []
+    let refreshCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      if (url.includes("oauth2.googleapis.com")) {
+        refreshCalls += 1
+        return { status: 200, bodyText: JSON.stringify({ access_token: "ya29.from-refresh", expires_in: 3600 }) }
+      }
+      if (url.includes("fetchAvailableModels")) {
+        capturedAuths.push(opts.headers.Authorization)
+        if (opts.headers.Authorization === "Bearer ya29.from-refresh") {
+          return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
+        }
+        return { status: 401, bodyText: '{"error":"unauthorized"}' }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(refreshCalls).toBe(1)
+    expect(capturedAuths[capturedAuths.length - 1]).toBe("Bearer ya29.from-refresh")
+    expect(result.lines.length).toBeGreaterThan(0)
+  })
+
+  it("expired access token + valid refresh token: refresh is called exactly once with the refreshed token", async () => {
+    const ctx = makeCtx()
+    const pastExpiry = Math.floor(Date.now() / 1000) - 60
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.expired", refreshToken: "1//refresh", expirySeconds: pastExpiry }))
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    let refreshCalls = 0
+    const ccCallTokens = []
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      if (url.includes("oauth2.googleapis.com")) {
+        refreshCalls += 1
+        return { status: 200, bodyText: JSON.stringify({ access_token: "ya29.new", expires_in: 3600 }) }
+      }
+      if (url.includes("fetchAvailableModels")) {
+        ccCallTokens.push(opts.headers.Authorization)
+        if (opts.headers.Authorization === "Bearer ya29.new") {
+          return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
+        }
+        return { status: 401, bodyText: '{"error":"unauthorized"}' }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    plugin.probe(ctx)
+
+    expect(refreshCalls).toBe(1)
+    // The expired token must never be sent, and Cloud Code is called exactly once with the refreshed token.
+    expect(ccCallTokens).toEqual(["Bearer ya29.new"])
+  })
+
+  it("DB access token equals cached token: Cloud Code is called exactly once", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.shared", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    const cachePath = ctx.app.pluginDataDir + "/auth.json"
+    ctx.host.fs.writeText(cachePath, JSON.stringify({
+      accessToken: "ya29.shared",
+      expiresAtMs: Date.now() + 3600000,
+    }))
+
+    let ccCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("fetchAvailableModels")) {
+        ccCalls += 1
+        return { status: 200, bodyText: JSON.stringify(makeCloudCodeResponse()) }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    plugin.probe(ctx)
+
+    expect(ccCalls).toBe(1)
+  })
+
+  it("does not refresh when Cloud Code returns 5xx (transient, not auth)", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.valid", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    let refreshCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      if (url.includes("oauth2.googleapis.com")) {
+        refreshCalls += 1
+        return { status: 200, bodyText: JSON.stringify({ access_token: "ya29.new" }) }
+      }
+      if (url.includes("fetchAvailableModels")) {
+        return { status: 500, bodyText: "" }
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+    expect(refreshCalls).toBe(0)
+  })
+
+  it("does not refresh when Cloud Code calls all throw (timeouts)", async () => {
+    const ctx = makeCtx()
+    const futureExpiry = Math.floor(Date.now() / 1000) + 3600
+    setupSqliteMock(ctx, makeOAuthSentinelB64(ctx, { accessToken: "ya29.valid", refreshToken: "1//refresh", expirySeconds: futureExpiry }))
+    ctx.host.ls.discover.mockReturnValue(null)
+
+    const cachePath = ctx.app.pluginDataDir + "/auth.json"
+    ctx.host.fs.writeText(cachePath, JSON.stringify({
+      accessToken: "ya29.cached",
+      expiresAtMs: Date.now() + 3600000,
+    }))
+
+    let refreshCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      const url = String(opts.url)
+      if (url.includes("oauth2.googleapis.com")) {
+        refreshCalls += 1
+        return { status: 200, bodyText: JSON.stringify({ access_token: "ya29.new" }) }
+      }
+      if (url.includes("fetchAvailableModels")) {
+        throw new Error("timeout")
+      }
+      return { status: 500, bodyText: "" }
+    })
+
+    const plugin = await loadPlugin()
+    expect(() => plugin.probe(ctx)).toThrow(LOGIN_MESSAGE)
+    expect(refreshCalls).toBe(0)
+  })
+
+  it("includes Google One AI Credits when present in GetUserStatus userTier", async () => {
+    const ctx = makeCtx()
+    const discovery = makeDiscovery()
+    const response = makeUserStatusResponse({
+      userTier: {
+        id: "g1-pro-tier",
+        name: "Google AI Pro",
+        availableCredits: [
+          {
+            creditType: "GOOGLE_ONE_AI",
+            creditAmount: "30.0",
+          },
+        ],
+      },
+    })
+    setupLsMock(ctx, discovery, response)
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    const labels = result.lines.map((l) => l.label)
+    expect(labels).toContain("Google One AI Credits")
+    const credsLine = result.lines.find((l) => l.label === "Google One AI Credits")
+    expect(credsLine.type).toBe("text")
+    expect(credsLine.value).toBe("30")
   })
 })

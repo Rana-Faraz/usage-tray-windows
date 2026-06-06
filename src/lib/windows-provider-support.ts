@@ -72,10 +72,10 @@ export const WINDOWS_PROVIDER_SUPPORT: Record<string, WindowsProviderSupport> = 
     note: "No local Factory auth was detected yet. Run `droid` so `~/.factory` contains a valid auth session.",
   },
   gemini: {
-    status: "deferred",
-    detectionStrategy: "Looks for `~/.gemini` credentials and Unix-oriented global npm/bun install paths.",
-    dependencies: ["Gemini CLI auth", "provider-specific OAuth helper discovery"],
-    note: "Gemini depends on Unix-heavy install-path probing and needs a Windows-specific credential discovery pass.",
+    status: "blocked",
+    detectionStrategy: "Retired in favor of Antigravity CLI.",
+    dependencies: ["None"],
+    note: "Retired in favor of Antigravity. Please track usage via the Antigravity provider.",
   },
   "jetbrains-ai-assistant": {
     status: "planned",
@@ -164,6 +164,15 @@ export function getWindowsProviderAvailabilityNote(
     return {
       kind: "planned",
       title: "Planned for Windows",
+      message: support.note,
+      suppressError: true,
+    }
+  }
+
+  if (plugin.meta.id === "gemini") {
+    return {
+      kind: "blocked",
+      title: "Retired",
       message: support.note,
       suppressError: true,
     }

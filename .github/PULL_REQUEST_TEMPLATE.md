@@ -17,9 +17,9 @@
 
 ## Testing
 
-- [ ] I ran `bun run build` and it succeeded
-- [ ] I ran `bun run test` and all tests pass
-- [ ] I tested the change locally with `bun tauri dev`
+- [ ] I ran `npm run build` and it succeeded
+- [ ] I ran `npm run test` and all tests pass
+- [ ] I tested the change locally with `npm run tauri dev`
 
 ## Screenshots
 

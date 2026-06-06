@@ -3,35 +3,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { PluginMeta } from "@/lib/plugin-types"
 import type { PluginSettings } from "@/lib/settings"
 
-const {
-  getByIdMock,
-  resolveResourceMock,
-  renderTrayBarsIconMock,
-  getTrayPrimaryBarsMock,
-} = vi.hoisted(() => ({
+const mocks = vi.hoisted(() => ({
   getByIdMock: vi.fn(),
   resolveResourceMock: vi.fn(),
   renderTrayBarsIconMock: vi.fn(),
   getTrayPrimaryBarsMock: vi.fn(),
+  invokeMock: vi.fn(),
 }))
 
 vi.mock("@tauri-apps/api/path", () => ({
-  resolveResource: resolveResourceMock,
+  resolveResource: mocks.resolveResourceMock,
 }))
 
 vi.mock("@tauri-apps/api/tray", () => ({
   TrayIcon: {
-    getById: getByIdMock,
+    getById: mocks.getByIdMock,
   },
+}))
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invokeMock,
 }))
 
 vi.mock("@/lib/tray-bars-icon", () => ({
   getTrayIconSizePx: vi.fn(() => 18),
-  renderTrayBarsIcon: renderTrayBarsIconMock,
+  renderTrayBarsIcon: mocks.renderTrayBarsIconMock,
 }))
 
 vi.mock("@/lib/tray-primary-progress", () => ({
-  getTrayPrimaryBars: getTrayPrimaryBarsMock,
+  getTrayPrimaryBars: mocks.getTrayPrimaryBarsMock,
 }))
 
 import { useTrayIcon } from "@/hooks/app/use-tray-icon"
@@ -54,14 +54,16 @@ describe("useTrayIcon", () => {
 
   beforeEach(() => {
     vi.useRealTimers()
-    getByIdMock.mockReset()
-    resolveResourceMock.mockReset()
-    renderTrayBarsIconMock.mockReset()
-    getTrayPrimaryBarsMock.mockReset()
+    mocks.getByIdMock.mockReset()
+    mocks.resolveResourceMock.mockReset()
+    mocks.renderTrayBarsIconMock.mockReset()
+    mocks.getTrayPrimaryBarsMock.mockReset()
+    mocks.invokeMock.mockReset()
 
-    resolveResourceMock.mockResolvedValue("/icons/tray-icon.png")
-    renderTrayBarsIconMock.mockResolvedValue("rendered-icon")
-    getTrayPrimaryBarsMock.mockReturnValue([{ id: "mock", fraction: 0.42 }])
+    mocks.resolveResourceMock.mockResolvedValue("/icons/tray-icon.png")
+    mocks.renderTrayBarsIconMock.mockResolvedValue("rendered-icon")
+    mocks.getTrayPrimaryBarsMock.mockReturnValue([{ id: "mock", fraction: 0.42 }])
+    mocks.invokeMock.mockResolvedValue(false)
   })
 
   it("falls back to percent text inside the provider icon when native tray titles are unavailable", async () => {
@@ -70,7 +72,7 @@ describe("useTrayIcon", () => {
       setIconAsTemplate: vi.fn().mockResolvedValue(undefined),
       setTooltip: vi.fn().mockResolvedValue(undefined),
     }
-    getByIdMock.mockResolvedValue(tray)
+    mocks.getByIdMock.mockResolvedValue(tray)
 
     renderHook(() =>
       useTrayIcon({
@@ -84,14 +86,14 @@ describe("useTrayIcon", () => {
     )
 
     await waitFor(() => {
-      expect(getByIdMock).toHaveBeenCalledWith("tray")
+      expect(mocks.getByIdMock).toHaveBeenCalledWith("tray")
     })
 
     await waitFor(() => {
-      expect(renderTrayBarsIconMock).toHaveBeenCalled()
+      expect(mocks.renderTrayBarsIconMock).toHaveBeenCalled()
     })
 
-    expect(renderTrayBarsIconMock).toHaveBeenCalledWith(
+    expect(mocks.renderTrayBarsIconMock).toHaveBeenCalledWith(
       expect.objectContaining({
         style: "provider",
         percentText: "42%",
@@ -107,7 +109,7 @@ describe("useTrayIcon", () => {
       setTooltip: vi.fn().mockResolvedValue(undefined),
       setTitle: vi.fn().mockResolvedValue(undefined),
     }
-    getByIdMock.mockResolvedValue(tray)
+    mocks.getByIdMock.mockResolvedValue(tray)
 
     renderHook(() =>
       useTrayIcon({
@@ -121,14 +123,14 @@ describe("useTrayIcon", () => {
     )
 
     await waitFor(() => {
-      expect(getByIdMock).toHaveBeenCalledWith("tray")
+      expect(mocks.getByIdMock).toHaveBeenCalledWith("tray")
     })
 
     await waitFor(() => {
-      expect(renderTrayBarsIconMock).toHaveBeenCalled()
+      expect(mocks.renderTrayBarsIconMock).toHaveBeenCalled()
     })
 
-    expect(renderTrayBarsIconMock).toHaveBeenCalledWith(
+    expect(mocks.renderTrayBarsIconMock).toHaveBeenCalledWith(
       expect.objectContaining({
         style: "provider",
         percentText: undefined,

@@ -28,7 +28,7 @@ By submitting a pull request, you agree that your contribution is licensed under
 1. Fork the repo
 2. Create a branch (`feat/my-change`, `fix/some-bug`, etc.)
 3. Make your changes
-4. Run `bun run build` and `bun run test` to verify nothing is broken
+4. Run `npm run build` and `npm run test` to verify nothing is broken
 5. Open a PR against `main`
 
 ### Add a provider plugin
@@ -38,7 +38,7 @@ Each provider is a plugin. See the [Plugin API docs](docs/plugins/api.md) for th
 1. Create a new folder under `plugins/` with your provider name
 2. Add `plugin.json` (metadata) and `plugin.js` (implementation)
 3. Add documentation in `docs/providers/`
-4. Test it locally with `bun tauri dev`
+4. Test it locally with `npm run tauri dev`
 5. Open a PR with screenshots showing it working
 
 You can also [open an issue](https://github.com/Rana-Faraz/usage-tray-windows/issues/new?template=new_provider.yml) to request a provider without building it yourself.

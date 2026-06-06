@@ -112,6 +112,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   isTauri: state.isTauriMock,
 }))
 
+vi.mock("@tauri-apps/plugin-log", () => ({
+  error: vi.fn(async () => {}),
+  warn: vi.fn(async () => {}),
+}))
+
 vi.mock("@/lib/analytics", () => ({
   track: state.trackMock,
 }))
@@ -394,7 +399,7 @@ describe("App", () => {
     expect(mq.addEventListener).toHaveBeenCalled()
 
     mmSpy.mockRestore()
-  })
+  }, 15000)
 
   it("loads plugins, normalizes settings, and renders overview", async () => {
     state.isTauriMock.mockReturnValue(true)

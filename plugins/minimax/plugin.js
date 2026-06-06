@@ -1,11 +1,10 @@
 (function () {
-  const GLOBAL_PRIMARY_USAGE_URL = "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
+  const GLOBAL_PRIMARY_USAGE_URL = "https://www.minimax.io/v1/token_plan/remains"
   const GLOBAL_FALLBACK_USAGE_URLS = [
-    "https://api.minimax.io/v1/coding_plan/remains",
-    "https://www.minimax.io/v1/api/openplatform/coding_plan/remains",
+    "https://www.minimax.io/v1/token_plan/remains",
   ]
-  const CN_PRIMARY_USAGE_URL = "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains"
-  const CN_FALLBACK_USAGE_URLS = ["https://api.minimaxi.com/v1/coding_plan/remains"]
+  const CN_PRIMARY_USAGE_URL = "https://api.minimaxi.com/v1/token_plan/remains"
+  const CN_FALLBACK_USAGE_URLS = ["https://api.minimaxi.com/v1/token_plan/remains"]
   const GLOBAL_API_KEY_ENV_VARS = ["MINIMAX_API_KEY", "MINIMAX_API_TOKEN"]
   const CN_API_KEY_ENV_VARS = ["MINIMAX_CN_API_KEY", "MINIMAX_API_KEY", "MINIMAX_API_TOKEN"]
   const CODING_PLAN_WINDOW_MS = 5 * 60 * 60 * 1000
@@ -244,21 +243,86 @@
 
     if (!modelRemains || modelRemains.length === 0) return null
 
-    let chosen = modelRemains[0]
+    const displayMultiplierForSelection = endpointSelection === "CN" ? 1 / MODEL_CALLS_PER_PROMPT : 1
+    let chosen = null
+    let percentFallbackCandidate = null
+    let generalPercentFallbackCandidate = null
     for (let i = 0; i < modelRemains.length; i += 1) {
       const item = modelRemains[i]
       if (!item || typeof item !== "object") continue
       const total = readNumber(item.current_interval_total_count ?? item.currentIntervalTotalCount)
-      if (total !== null && total > 0) {
+      if (total !== null && total > 0 && Math.round(total * displayMultiplierForSelection) > 0) {
         chosen = item
         break
       }
+      const remainingPercent = readNumber(
+        item.current_interval_remaining_percent ??
+          item.currentIntervalRemainingPercent
+      )
+      if (remainingPercent !== null && remainingPercent >= 0 && remainingPercent <= 100) {
+        const modelName = readString(item.model_name ?? item.modelName)
+        if (!percentFallbackCandidate) percentFallbackCandidate = item
+        if (!generalPercentFallbackCandidate && modelName === "general") {
+          generalPercentFallbackCandidate = item
+        }
+      }
     }
+    if (!chosen) chosen = generalPercentFallbackCandidate || percentFallbackCandidate
 
     if (!chosen || typeof chosen !== "object") return null
 
     const total = readNumber(chosen.current_interval_total_count ?? chosen.currentIntervalTotalCount)
-    if (total === null || total <= 0) return null
+    const remainingPercent = readNumber(
+      chosen.current_interval_remaining_percent ??
+        chosen.currentIntervalRemainingPercent
+    )
+
+    // Handle percentage-based response (new Token Plan API)
+    // When total_count is 0 but remaining_percent exists, use percentage mode
+    const hasDisplayableCount =
+      total !== null && total > 0 && Math.round(total * displayMultiplierForSelection) > 0
+
+    if (!hasDisplayableCount && remainingPercent !== null) {
+      const percentRemaining = remainingPercent
+      const percentUsed = 100 - percentRemaining
+      const startMs = epochToMs(chosen.start_time ?? chosen.startTime)
+      const endMs = epochToMs(chosen.end_time ?? chosen.endTime)
+      const remainsRaw = readNumber(chosen.remains_time ?? chosen.remainsTime)
+      const nowMs = Date.now()
+      const remainsMs = inferRemainsMs(remainsRaw, endMs, nowMs)
+
+      let resetsAt = endMs !== null ? ctx.util.toIso(endMs) : null
+      if (!resetsAt && remainsMs !== null) {
+        resetsAt = ctx.util.toIso(nowMs + remainsMs)
+      }
+
+      let periodDurationMs = null
+      if (startMs !== null && endMs !== null && endMs > startMs) {
+        periodDurationMs = endMs - startMs
+      }
+
+      const explicitPlanName = normalizePlanName(pickFirstString([
+        data.current_subscribe_title,
+        data.plan_name,
+        data.plan,
+        data.current_plan_title,
+        data.combo_title,
+        payload.current_subscribe_title,
+        payload.plan_name,
+        payload.plan,
+      ]))
+
+      return {
+        planName: explicitPlanName || null,
+        used: percentUsed,
+        total: 100,
+        resetsAt,
+        periodDurationMs,
+        isPercent: true,
+      }
+    }
+
+    if (!hasDisplayableCount) return null
 
     const usageFieldCount = readNumber(chosen.current_interval_usage_count ?? chosen.currentIntervalUsageCount)
     const remainingCount = readNumber(
@@ -366,12 +430,15 @@
     // GLOBAL API returns prompt counts directly
     const isCnEndpoint = successfulEndpoint === "CN"
     const displayMultiplier = isCnEndpoint ? 1 / MODEL_CALLS_PER_PROMPT : 1
+    const valueMultiplier = parsed.isPercent ? 1 : displayMultiplier
 
     const line = {
       label: "Session",
-      used: Math.round(parsed.used * displayMultiplier),
-      limit: Math.round(parsed.total * displayMultiplier),
-      format: { kind: "count", suffix: "prompts" },
+      used: Math.round(parsed.used * valueMultiplier),
+      limit: Math.round(parsed.total * valueMultiplier),
+      format: parsed.isPercent
+        ? { kind: "percent" }
+        : { kind: "count", suffix: "prompts" },
     }
     if (parsed.resetsAt) line.resetsAt = parsed.resetsAt
     if (parsed.periodDurationMs !== null) line.periodDurationMs = parsed.periodDurationMs

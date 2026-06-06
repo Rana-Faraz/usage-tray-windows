@@ -1,7 +1,7 @@
 (function () {
   const AUTH_V2_PATH = "~/.factory/auth.v2.file"
   const AUTH_V2_KEY_PATH = "~/.factory/auth.v2.key"
-  const LEGACY_AUTH_PATHS = ["~/.factory/auth.encrypted", "~/.factory/auth.json"]
+  const AUTH_PATHS = ["~/.factory/auth.encrypted", "~/.factory/auth.json"]
   const KEYCHAIN_SERVICES = ["Factory Token", "Factory token", "Factory Auth", "Droid Auth"]
   const WORKOS_CLIENT_ID = "client_01HNM792M5G5G1A2THWPXKFMXB"
   const WORKOS_AUTH_URL = "https://api.workos.com/user_management/authenticate"
@@ -128,7 +128,7 @@
     const v2Auth = loadAuthFromV2File(ctx)
     if (v2Auth) return v2Auth
 
-    for (const authPath of LEGACY_AUTH_PATHS) {
+    for (const authPath of AUTH_PATHS) {
       if (!ctx.host.fs.exists(authPath)) continue
 
       try {
@@ -187,7 +187,7 @@
     if (!ctx.host.fs.exists(AUTH_V2_KEY_PATH)) {
       ctx.host.log.warn("auth file not found: " + AUTH_V2_KEY_PATH)
     }
-    for (const authPath of LEGACY_AUTH_PATHS.concat([AUTH_V2_PATH])) {
+    for (const authPath of AUTH_PATHS) {
       if (!ctx.host.fs.exists(authPath)) {
         ctx.host.log.warn("auth file not found: " + authPath)
       }
@@ -314,7 +314,7 @@
   }
 
   function fetchUsage(ctx, accessToken) {
-    return ctx.util.request({
+    var resp = ctx.util.request({
       method: "POST",
       url: USAGE_URL,
       headers: {
@@ -326,6 +326,20 @@
       bodyText: JSON.stringify({ useCache: true }),
       timeoutMs: 10000,
     })
+    if (resp.status === 405) {
+      ctx.host.log.info("POST returned 405, retrying with GET")
+      resp = ctx.util.request({
+        method: "GET",
+        url: USAGE_URL,
+        headers: {
+          Authorization: "Bearer " + accessToken,
+          Accept: "application/json",
+          "User-Agent": "UsageTray",
+        },
+        timeoutMs: 10000,
+      })
+    }
+    return resp
   }
 
   function probe(ctx) {

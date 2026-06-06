@@ -17,13 +17,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-const WHITELISTED_ENV_VARS: [&str; 8] = [
+const WHITELISTED_ENV_VARS: [&str; 17] = [
     "CODEX_HOME",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "USER_TYPE",
+    "USE_STAGING_OAUTH",
+    "USE_LOCAL_OAUTH",
+    "CLAUDE_CODE_CUSTOM_OAUTH_URL",
+    "CLAUDE_CODE_OAUTH_CLIENT_ID",
+    "CLAUDE_LOCAL_OAUTH_API_BASE",
     "ZAI_API_KEY",
     "GLM_API_KEY",
     "MINIMAX_API_KEY",
     "MINIMAX_API_TOKEN",
     "MINIMAX_CN_API_KEY",
+    "OPENROUTER_API_KEY",
     "SYNTHETIC_API_KEY",
     "PI_CODING_AGENT_DIR",
 ];
@@ -1671,7 +1680,7 @@ fn inject_ls<'js>(ctx: &Ctx<'js>, host: &Object<'js>, plugin_id: &str) -> rquick
                     let app_data =
                         ls_extract_flag(command, "--app_data_dir").map(|v| v.to_lowercase());
 
-                    let has_marker = markers_lower.iter().any(|m| {
+                    let has_marker = markers_lower.is_empty() || markers_lower.iter().any(|m| {
                         // Prefer exact flag match; skip path fallback when
                         // a distinguishing flag exists.
                         if let Some(ref name) = ide_name {
@@ -1751,11 +1760,15 @@ fn inject_ls<'js>(ctx: &Ctx<'js>, host: &Object<'js>, plugin_id: &str) -> rquick
                 };
 
                 // Extract CSRF token
-                let csrf = match ls_extract_flag(&command, &opts.csrf_flag) {
-                    Some(c) => c,
-                    None => {
-                        log::warn!("[plugin:{}] CSRF token not found in process args", pid);
-                        return Ok("null".to_string());
+                let csrf = if opts.csrf_flag.is_empty() {
+                    "".to_string()
+                } else {
+                    match ls_extract_flag(&command, &opts.csrf_flag) {
+                        Some(c) => c,
+                        None => {
+                            log::warn!("[plugin:{}] CSRF token not found in process args", pid);
+                            return Ok("null".to_string());
+                        }
                     }
                 };
 

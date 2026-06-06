@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.6.26
+
+### New Features
+- **feat(antigravity)**: Add plan name tracking, update manifest, and deprecate gemini provider by @FelixIsaac
+- **feat(antigravity)**: Parse and display account-wide Prompt and Flow Credits and Google One AI Credits by @FelixIsaac
+- **feat(plugins)**: Sync upstream updates, port Grok, and restore Windows compatibility by @FelixIsaac
+- **feat(plugins)**: Add OpenRouter provider plugin and update compatibility matrix by @FelixIsaac
+- **feat(tray)**: Dynamic black/white tray icon based on Windows taskbar theme by @FelixIsaac
+
+### Bug Fixes
+- **fix(tray)**: Dynamically fetch and inject theme color for plugin SVG icons in system tray by @FelixIsaac
+- **fix(tray)**: Support base64 and utf8 data URI decoding/coloring for provider icons by @FelixIsaac
+- **test(antigravity)**: Add assertions for plan line presence/absence by @FelixIsaac
+
+### Refactor / Chores
+- **chore**: Migrate build commands and scripts from bun to node/npm by @FelixIsaac
+- **chore**: Update build script and lockfile for windows by @FelixIsaac
+- **docs**: Update local setup and testing instructions to use npm instead of bun by @FelixIsaac
+- **docs**: Simplify and shorten provider notes in Windows matrix by @FelixIsaac
+
+---
+
+### Changelog
+
+**Full Changelog**: [v0.6.14...v0.6.26](https://github.com/Rana-Faraz/usage-tray-windows/compare/v0.6.14...v0.6.26)
+
+- [7846dbc](https://github.com/Rana-Faraz/usage-tray-windows/commit/7846dbc) docs: simplify and shorten provider notes in Windows matrix by @FelixIsaac
+- [37340e3](https://github.com/Rana-Faraz/usage-tray-windows/commit/37340e3) docs: update local setup and testing instructions to use npm instead of bun by @FelixIsaac
+- [e0c93c1](https://github.com/Rana-Faraz/usage-tray-windows/commit/e0c93c1) feat(antigravity): parse and display account-wide Prompt and Flow Credits and Google One AI Credits by @FelixIsaac
+- [015828e](https://github.com/Rana-Faraz/usage-tray-windows/commit/015828e) fix(tray): support base64 and utf8 data URI decoding/coloring for provider icons by @FelixIsaac
+- [92d0568](https://github.com/Rana-Faraz/usage-tray-windows/commit/92d0568) fix(tray): dynamically fetch and inject theme color for plugin SVG icons in system tray by @FelixIsaac
+- [74be577](https://github.com/Rana-Faraz/usage-tray-windows/commit/74be577) feat(tray): dynamic black/white tray icon based on Windows taskbar theme, bump version to 0.6.25 by @FelixIsaac
+- [0b5ebd0](https://github.com/Rana-Faraz/usage-tray-windows/commit/0b5ebd0) feat(plugins): add OpenRouter provider plugin and update compatibility matrix by @FelixIsaac
+- [16ba4ac](https://github.com/Rana-Faraz/usage-tray-windows/commit/16ba4ac) docs: update windows provider compatibility matrix by @FelixIsaac
+- [2eb1447](https://github.com/Rana-Faraz/usage-tray-windows/commit/2eb1447) feat(plugins): sync upstream updates, port Grok, and restore Windows compatibility by @FelixIsaac
+- [cca1d13](https://github.com/Rana-Faraz/usage-tray-windows/commit/cca1d13) chore: update build script and lockfile for windows by @FelixIsaac
+- [9501ad9](https://github.com/Rana-Faraz/usage-tray-windows/commit/9501ad9) chore: migrate build commands and scripts from bun to node/npm by @FelixIsaac
+- [6d3c276](https://github.com/Rana-Faraz/usage-tray-windows/commit/6d3c276) chore: bump cargo version to 0.6.15 by @FelixIsaac
+- [9e19a7b](https://github.com/Rana-Faraz/usage-tray-windows/commit/9e19a7b) chore: bump version to 0.6.15 and update CHANGELOG.md by @FelixIsaac
+- [6f41365](https://github.com/Rana-Faraz/usage-tray-windows/commit/6f41365) test(antigravity): add assertions for plan line presence/absence by @FelixIsaac
+- [fca6281](https://github.com/Rana-Faraz/usage-tray-windows/commit/fca6281) feat(antigravity): add plan name tracking, update manifest, and deprecate gemini provider by @FelixIsaac
+
+---
+
+
+### New Features
+- Add active plan name display (e.g., "Pro") at the top of the Antigravity provider overview.
+
+### Bug Fixes
+- Block/retire the Gemini CLI/provider in the Windows provider support in favor of the new unified Antigravity CLI.
+
+### Chores
+- Bump Antigravity plugin version to `0.0.2`.
+
+---
+
+### Changelog
+
+**Full Changelog**: [v0.6.14...v0.6.15](https://github.com/Rana-Faraz/usage-tray-windows/compare/v0.6.14...v0.6.15)
+
 ## 0.6.14
 
 ### New Features

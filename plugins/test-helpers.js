@@ -68,7 +68,9 @@ export const makeCtx = () => {
       },
       keychain: {
         readGenericPassword: vi.fn(),
+        readGenericPasswordForCurrentUser: vi.fn(),
         writeGenericPassword: vi.fn(),
+        writeGenericPasswordForCurrentUser: vi.fn(),
         deleteGenericPassword: vi.fn(),
       },
       crypto: {
@@ -84,6 +86,7 @@ export const makeCtx = () => {
           )
         }),
         aes256GcmEncrypt: vi.fn((req) => encryptEnvelope(req.plaintext, req.keyB64, req.ivB64)),
+        sha256Hex: vi.fn((text) => crypto.createHash("sha256").update(String(text)).digest("hex")),
       },
       windows: {
         knownPath: vi.fn(() => null),

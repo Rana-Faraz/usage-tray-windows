@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { resolveResource } from "@tauri-apps/api/path"
 import { TrayIcon } from "@tauri-apps/api/tray"
+import { invoke } from "@tauri-apps/api/core"
 import type { PluginMeta } from "@/lib/plugin-types"
 import type { DisplayMode, MenubarIconStyle, PluginSettings } from "@/lib/settings"
 import { getEnabledPluginIds } from "@/lib/settings"
@@ -67,6 +68,7 @@ export function useTrayIcon({
   const [traySettingsPreview, setTraySettingsPreview] = useState<TraySettingsPreview>(
     EMPTY_TRAY_SETTINGS_PREVIEW
   )
+  const [themeTrigger, setThemeTrigger] = useState(0)
 
   const pluginsMetaRef = useRef(pluginsMeta)
   const pluginSettingsRef = useRef(pluginSettings)
@@ -109,7 +111,7 @@ export function useTrayIcon({
       trayUpdateTimerRef.current = null
     }
 
-    trayUpdateTimerRef.current = window.setTimeout(() => {
+    trayUpdateTimerRef.current = window.setTimeout(async () => {
       trayUpdateTimerRef.current = null
       if (trayUpdatePendingRef.current) {
         trayUpdateQueuedRef.current = true
@@ -247,11 +249,28 @@ export function useTrayIcon({
       const tooltip = formatTrayTooltip(tooltipBars, pluginsMetaRef.current)
       const updateTooltip = () => setTrayTooltip(tooltip)
 
+      let isSystemDark = false
+      try {
+        const res = await invoke<unknown>("is_system_in_dark_mode")
+        if (typeof res === "boolean") {
+          isSystemDark = res
+        } else if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+          isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
+        }
+      } catch (e) {
+        console.error("Failed to query is_system_in_dark_mode:", e)
+        if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+          isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
+        }
+      }
+      const trayColor = isSystemDark ? "white" : "black"
+
       if (style === "bars") {
         renderTrayBarsIcon({
           bars: barsForPreview,
           sizePx,
           style: "bars",
+          color: trayColor,
         })
           .then(async (img) => {
             await tray.setIcon(img)
@@ -280,6 +299,7 @@ export function useTrayIcon({
           sizePx,
           style: "donut",
           providerIconUrl,
+          color: trayColor,
         })
           .then(async (img) => {
             await tray.setIcon(img)
@@ -302,6 +322,7 @@ export function useTrayIcon({
         style: "provider",
         percentText: supportsNativeTrayTitle ? undefined : providerPercentText,
         providerIconUrl,
+        color: trayColor,
       })
         .then(async (img) => {
           await tray.setIcon(img)
@@ -349,6 +370,18 @@ export function useTrayIcon({
   }, [])
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return
+    }
+    const mq = window.matchMedia("(prefers-color-scheme: dark)")
+    const handler = () => {
+      setThemeTrigger((prev) => prev + 1)
+    }
+    mq.addEventListener("change", handler)
+    return () => mq.removeEventListener("change", handler)
+  }, [])
+
+  useEffect(() => {
     if (!trayReady) return
     if (!pluginSettings) return
     if (pluginsMeta.length === 0) return
@@ -358,7 +391,7 @@ export function useTrayIcon({
   useEffect(() => {
     if (!trayReady) return
     scheduleTrayIconUpdate("settings", 0)
-  }, [activeView, menubarIconStyle, scheduleTrayIconUpdate, trayReady])
+  }, [activeView, menubarIconStyle, themeTrigger, scheduleTrayIconUpdate, trayReady])
 
   useEffect(() => {
     return () => {

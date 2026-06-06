@@ -1,6 +1,6 @@
 [package]
 name = "usage-tray-windows"
-version = "0.6.14"
+version = "0.6.26"
 description = "UsageTray is an unofficial Windows fork of OpenUsage for tracking AI coding subscription usage"
 authors = ["Faraz Rana"]
 edition = "2024"
@@ -12,7 +12,7 @@ edition = "2024"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "usage_tray_windows_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -42,6 +42,9 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
 objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSScreen", "NSGraphics"] }
 objc2-web-kit = { version = "0.3", features = ["WKPreferences", "WKWebView", "WKWebViewConfiguration"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.52"
 
 [dev-dependencies]
 serial_test = "3.4.0"

@@ -138,6 +138,23 @@ pub struct ProbeBatchComplete {
 }
 
 #[tauri::command]
+fn is_system_in_dark_mode() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(subkey) = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize") {
+            if let Ok(val) = subkey.get_value::<u32, _>("SystemUsesLightTheme") {
+                return val == 0;
+            }
+        }
+    }
+    false
+}
+
+#[tauri::command]
 fn init_panel(app_handle: tauri::AppHandle) {
     panel::init(&app_handle).expect("Failed to initialize panel");
 }
@@ -438,7 +455,8 @@ pub fn run() {
             start_probe_batch,
             list_plugins,
             get_log_path,
-            update_global_shortcut
+            update_global_shortcut,
+            is_system_in_dark_mode
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -477,7 +495,10 @@ pub fn run() {
             tray::create(app.handle())?;
             panel::init(app.handle())?;
             #[cfg(desktop)]
-            show_panel_on_first_run_if_needed(app.handle());
+            {
+                show_panel_on_first_run_if_needed(app.handle());
+                panel::show_panel(app.handle());
+            }
 
             // Register global shortcut from stored settings
             #[cfg(desktop)]

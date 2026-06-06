@@ -19,8 +19,8 @@ fi
 rm -rf src-tauri/target/release/bundle
 
 # Build
-bun tauri build "$@"
+npm run tauri -- build "$@"
 
 echo ""
 echo "✓ Build complete! Output:"
-ls -la src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null || ls -la src-tauri/target/release/bundle/macos/*.app
+ls -la src-tauri/target/release/bundle/msi/*.msi 2>/dev/null || ls -la src-tauri/target/release/bundle/nsis/*.exe 2>/dev/null || echo "(no bundle artifacts found)"

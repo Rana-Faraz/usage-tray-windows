@@ -182,4 +182,127 @@ describe("tray-bars-icon", () => {
       ;(document as any).createElement = originalCreateElement
     }
   })
+
+  it("renderTrayBarsIcon fetches and replaces currentColor in SVGs", async () => {
+    const originalFetch = window.fetch
+    const mockFetch = vi.fn(async () => ({
+      ok: true,
+      text: async () => '<svg><path d="M1" fill="currentColor"/></svg>',
+    } as unknown as Response))
+    window.fetch = mockFetch
+
+    const originalImage = window.Image
+    const originalCreateElement = document.createElement.bind(document)
+
+    // Stub Image loader
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).Image = class MockImage {
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      decoding = "async"
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.())
+      }
+    }
+
+    // Stub canvas context
+    const ctx = {
+      clearRect: () => {},
+      drawImage: () => {},
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+      }),
+    }
+
+    // Patch createElement for canvas only
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(document as any).createElement = (tag: string) => {
+      const el = originalCreateElement(tag)
+      if (tag === "canvas") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(el as any).getContext = () => ctx
+      }
+      return el
+    }
+
+    try {
+      const img = await renderTrayBarsIcon({
+        bars: [],
+        sizePx: 18,
+        providerIconUrl: "plugins/claude/icon.svg",
+        color: "white",
+      })
+      expect(img).toBeTruthy()
+      expect(mockFetch.mock.calls[0]?.[0]).toBe("plugins/claude/icon.svg")
+    } finally {
+      window.fetch = originalFetch
+      window.Image = originalImage
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(document as any).createElement = originalCreateElement
+    }
+  })
+
+  it("renderTrayBarsIcon decodes and replaces currentColor in base64 data URI SVGs", async () => {
+    const originalImage = window.Image
+    const originalCreateElement = document.createElement.bind(document)
+    const originalCreateObjectURL = URL.createObjectURL
+
+    let capturedBlob: Blob | null = null
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      capturedBlob = blob
+      return "blob:mock"
+    })
+
+    // Stub Image loader
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).Image = class MockImage {
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      decoding = "async"
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.())
+      }
+    }
+
+    // Stub canvas context
+    const ctx = {
+      clearRect: () => {},
+      drawImage: () => {},
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+      }),
+    }
+
+    // Patch createElement for canvas only
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(document as any).createElement = (tag: string) => {
+      const el = originalCreateElement(tag)
+      if (tag === "canvas") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(el as any).getContext = () => ctx
+      }
+      return el
+    }
+
+    try {
+      const base64Svg = btoa('<svg><path d="M1" fill="currentColor"/></svg>')
+      const img = await renderTrayBarsIcon({
+        bars: [],
+        sizePx: 18,
+        providerIconUrl: `data:image/svg+xml;base64,${base64Svg}`,
+        color: "white",
+      })
+      expect(img).toBeTruthy()
+      expect(capturedBlob).toBeTruthy()
+      if (capturedBlob) {
+        const text = await (capturedBlob as Blob).text()
+        expect(decodeURIComponent(text)).toContain('fill="white"')
+      }
+    } finally {
+      URL.createObjectURL = originalCreateObjectURL
+      window.Image = originalImage
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(document as any).createElement = originalCreateElement
+    }
+  })
 })

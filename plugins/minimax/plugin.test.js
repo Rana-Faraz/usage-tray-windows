@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { makeCtx } from "../test-helpers.js"
 
-const PRIMARY_USAGE_URL = "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
-const FALLBACK_USAGE_URL = "https://api.minimax.io/v1/coding_plan/remains"
-const LEGACY_WWW_USAGE_URL = "https://www.minimax.io/v1/api/openplatform/coding_plan/remains"
-const CN_PRIMARY_USAGE_URL = "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains"
-const CN_FALLBACK_USAGE_URL = "https://api.minimaxi.com/v1/coding_plan/remains"
+const PRIMARY_USAGE_URL = "https://www.minimax.io/v1/token_plan/remains"
+const FALLBACK_USAGE_URL = "https://www.minimax.io/v1/token_plan/remains"
+const LEGACY_WWW_USAGE_URL = "https://www.minimax.io/v1/token_plan/remains"
+const CN_PRIMARY_USAGE_URL = "https://api.minimaxi.com/v1/token_plan/remains"
+const CN_FALLBACK_USAGE_URL = "https://api.minimaxi.com/v1/token_plan/remains"
 
 const loadPlugin = async () => {
   await import("./plugin.js")
@@ -441,63 +441,23 @@ describe("minimax plugin", () => {
       message = String(e)
     }
     expect(message).toContain("Session expired")
-    expect(ctx.host.http.request.mock.calls.length).toBe(5)
+    expect(ctx.host.http.request.mock.calls.length).toBe(4)
   })
 
-  it("falls back to secondary endpoint when primary fails", async () => {
+  it("throws when primary endpoint fails", async () => {
     const ctx = makeCtx()
     setEnv(ctx, { MINIMAX_API_KEY: "mini-key" })
-    ctx.host.http.request.mockImplementation((req) => {
-      if (req.url === PRIMARY_USAGE_URL) return { status: 503, headers: {}, bodyText: "{}" }
-      if (req.url === FALLBACK_USAGE_URL) {
-        return {
-          status: 200,
-          headers: {},
-          bodyText: JSON.stringify(successPayload()),
-        }
-      }
-      return { status: 404, headers: {}, bodyText: "{}" }
-    })
-
+    ctx.host.http.request.mockReturnValue({ status: 503, headers: {}, bodyText: "{}" })
     const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(result.lines[0].used).toBe(120)
-    expect(ctx.host.http.request.mock.calls.length).toBe(2)
+    expect(() => plugin.probe(ctx)).toThrow("Request failed (HTTP 503)")
   })
 
-  it("uses CN fallback endpoint when CN primary fails", async () => {
+  it("throws when CN primary endpoint fails", async () => {
     const ctx = makeCtx()
     setEnv(ctx, { MINIMAX_CN_API_KEY: "cn-key" })
-    ctx.host.http.request.mockImplementation((req) => {
-      if (req.url === CN_PRIMARY_USAGE_URL) return { status: 503, headers: {}, bodyText: "{}" }
-      if (req.url === CN_FALLBACK_USAGE_URL) {
-        return {
-          status: 200,
-          headers: {},
-          bodyText: JSON.stringify(successPayload({
-            model_remains: [
-              {
-                model_name: "MiniMax-M2",
-                current_interval_total_count: 1500, // CN Plus: 100 prompts × 15
-                current_interval_usage_count: 1200, // Remaining
-                start_time: 1700000000000,
-                end_time: 1700018000000,
-              },
-            ],
-          })),
-        }
-      }
-      return { status: 404, headers: {}, bodyText: "{}" }
-    })
-
+    ctx.host.http.request.mockReturnValue({ status: 503, headers: {}, bodyText: "{}" })
     const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(result.lines[0].used).toBe(20) // (1500-1200) / 15 = 20
-    expect(ctx.host.http.request.mock.calls.length).toBe(2)
-    expect(ctx.host.http.request.mock.calls[0][0].url).toBe(CN_PRIMARY_USAGE_URL)
-    expect(ctx.host.http.request.mock.calls[1][0].url).toBe(CN_FALLBACK_USAGE_URL)
+    expect(() => plugin.probe(ctx)).toThrow("Request failed (HTTP 503)")
   })
 
   it("infers CN Starter plan from 600 model-call limit", async () => {
@@ -620,27 +580,12 @@ describe("minimax plugin", () => {
     expect(result.lines[0].used).toBe(200) // (9000-6000) / 15 = 200 prompts
   })
 
-  it("falls back when primary returns auth-like status", async () => {
+  it("throws when primary returns auth-like status", async () => {
     const ctx = makeCtx()
     setEnv(ctx, { MINIMAX_API_KEY: "mini-key" })
-    ctx.host.http.request.mockImplementation((req) => {
-      if (req.url === PRIMARY_USAGE_URL) return { status: 403, headers: {}, bodyText: "<html>cf</html>" }
-      if (req.url === FALLBACK_USAGE_URL) {
-        return {
-          status: 200,
-          headers: {},
-          bodyText: JSON.stringify(successPayload()),
-        }
-      }
-      if (req.url === LEGACY_WWW_USAGE_URL) return { status: 403, headers: {}, bodyText: "<html>cf</html>" }
-      return { status: 404, headers: {}, bodyText: "{}" }
-    })
-
+    ctx.host.http.request.mockReturnValue({ status: 403, headers: {}, bodyText: "<html>cf</html>" })
     const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(result.lines[0].used).toBe(120)
-    expect(ctx.host.http.request.mock.calls.length).toBe(2)
+    expect(() => plugin.probe(ctx)).toThrow("Session expired")
   })
 
   it("throws when API returns non-zero base_resp status", async () => {
@@ -939,5 +884,171 @@ describe("minimax plugin", () => {
 
     const plugin = await loadPlugin()
     expect(() => plugin.probe(ctx)).toThrow("Could not parse usage data")
+  })
+
+  it("handles percentage-based response from Token Plan API", async () => {
+    const ctx = makeCtx()
+    setEnv(ctx, { MINIMAX_API_KEY: "mini-key" })
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+    ctx.host.http.request.mockReturnValue({
+      status: 200,
+      headers: {},
+      bodyText: JSON.stringify({
+        base_resp: { status_code: 0 },
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 87,
+            remains_time: 5111151,
+            start_time: 1780326000000,
+            end_time: 1780344000000,
+          },
+        ],
+      }),
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    const line = result.lines[0]
+
+    // 87% remaining = 13% used
+    expect(line.used).toBe(13)
+    expect(line.limit).toBe(100)
+    expect(line.format.kind).toBe("percent")
+    expect(line.resetsAt).toBe(new Date(1780344000000).toISOString())
+  })
+
+  it("does not scale CN percentage-based Token Plan responses", async () => {
+    const ctx = makeCtx()
+    setEnv(ctx, { MINIMAX_CN_API_KEY: "cn-key" })
+    ctx.host.http.request.mockReturnValue({
+      status: 200,
+      headers: {},
+      bodyText: JSON.stringify({
+        base_resp: { status_code: 0 },
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 87,
+          },
+        ],
+      }),
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    const line = result.lines[0]
+
+    expect(line.used).toBe(13)
+    expect(line.limit).toBe(100)
+    expect(line.format.kind).toBe("percent")
+  })
+
+  it("falls back to CN remaining percent when count totals are unavailable", async () => {
+    const ctx = makeCtx()
+    setEnv(ctx, { MINIMAX_CN_API_KEY: "cn-key" })
+    ctx.host.http.request.mockReturnValue({
+      status: 200,
+      headers: {},
+      bodyText: JSON.stringify({
+        base_resp: { status_code: 0 },
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 94,
+            start_time: 1780279200000,
+            end_time: 1780297200000,
+          },
+          {
+            model_name: "video",
+            current_interval_total_count: 3,
+            current_interval_usage_count: 3,
+            current_interval_remaining_percent: 100,
+          },
+        ],
+      }),
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    const line = result.lines[0]
+
+    expect(line.used).toBe(6)
+    expect(line.limit).toBe(100)
+    expect(line.format.kind).toBe("percent")
+    expect(line.resetsAt).toBe(new Date(1780297200000).toISOString())
+  })
+
+  it("falls back to CN remaining percent when small count rows come first", async () => {
+    const ctx = makeCtx()
+    setEnv(ctx, { MINIMAX_CN_API_KEY: "cn-key" })
+    ctx.host.http.request.mockReturnValue({
+      status: 200,
+      headers: {},
+      bodyText: JSON.stringify({
+        base_resp: { status_code: 0 },
+        model_remains: [
+          {
+            model_name: "video",
+            current_interval_total_count: 3,
+            current_interval_usage_count: 3,
+            current_interval_remaining_percent: 100,
+          },
+          {
+            model_name: "general",
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 94,
+          },
+        ],
+      }),
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    const line = result.lines[0]
+
+    expect(line.used).toBe(6)
+    expect(line.limit).toBe(100)
+    expect(line.format.kind).toBe("percent")
+  })
+
+  it("handles weekly percentage from Token Plan API", async () => {
+    const ctx = makeCtx()
+    setEnv(ctx, { MINIMAX_API_KEY: "mini-key" })
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+    ctx.host.http.request.mockReturnValue({
+      status: 200,
+      headers: {},
+      bodyText: JSON.stringify({
+        base_resp: { status_code: 0 },
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 0,
+            current_weekly_total_count: 0,
+            current_weekly_usage_count: 0,
+            current_weekly_remaining_percent: 100,
+          },
+        ],
+      }),
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    const line = result.lines[0]
+
+    // 0% remaining in interval, but 100% weekly remaining
+    expect(line.used).toBe(100)
+    expect(line.limit).toBe(100)
+    expect(line.format.kind).toBe("percent")
   })
 })

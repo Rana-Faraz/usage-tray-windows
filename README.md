@@ -19,9 +19,9 @@ This repository is an unofficial Windows-focused fork of [OpenUsage](https://git
 ## Or From Source
 If you don't want to install the binary, or you want to develop on the project, you can run it from source with these steps:
 1. Clone the repo
-2. Install Deps: Make sure you have rust (with cargo) installed, and bun
-3. Restore packages: `bun install`
-4. Run in dev mode with hot reload: `bun run tauri dev`
+2. Install Deps: Make sure you have rust (with cargo) installed, and Node.js
+3. Restore packages: `npm install`
+4. Run in dev mode with hot reload: `npm run tauri dev`
 
 ## What It Does
 

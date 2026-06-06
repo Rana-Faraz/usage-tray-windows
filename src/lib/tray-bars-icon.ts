@@ -182,8 +182,9 @@ export function makeTrayBarsSvg(args: {
   style?: MenubarIconStyle
   percentText?: string
   providerIconUrl?: string
+  color?: string
 }): string {
-  const { bars, sizePx, style = "provider", percentText, providerIconUrl } = args
+  const { bars, sizePx, style = "provider", percentText, providerIconUrl, color = "black" } = args
   const barsForStyle = style === "bars" ? bars : bars.slice(0, 1)
   // Intentionally render a single empty track when bars mode has no data yet
   // so the tray icon keeps a stable shape during loading/initialization.
@@ -221,7 +222,7 @@ export function makeTrayBarsSvg(args: {
       const radius = Math.max(2, iconSize / 2 - 1.5)
       const strokeW = Math.max(1.5, Math.round(iconSize * 0.14))
       parts.push(
-        `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="black" stroke-width="${strokeW}" opacity="1" shape-rendering="geometricPrecision" />`
+        `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeW}" opacity="1" shape-rendering="geometricPrecision" />`
       )
     }
   } else if (style === "donut") {
@@ -240,7 +241,7 @@ export function makeTrayBarsSvg(args: {
       const fallbackR = Math.max(2, iconSize / 2 - 1.5)
       const fallbackSW = Math.max(1.5, Math.round(iconSize * 0.14))
       parts.push(
-        `<circle cx="${fcx}" cy="${fcy}" r="${fallbackR}" fill="none" stroke="black" stroke-width="${fallbackSW}" opacity="1" shape-rendering="geometricPrecision" />`
+        `<circle cx="${fcx}" cy="${fcy}" r="${fallbackR}" fill="none" stroke="${color}" stroke-width="${fallbackSW}" opacity="1" shape-rendering="geometricPrecision" />`
       )
     }
 
@@ -253,7 +254,7 @@ export function makeTrayBarsSvg(args: {
     const radius = Math.max(1, Math.floor(chartSize / 2 - strokeW / 2) + 0.5)
 
     parts.push(
-      `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="black" stroke-width="${strokeW}" opacity="${BARS_TRACK_OPACITY}" shape-rendering="geometricPrecision" />`
+      `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeW}" opacity="${BARS_TRACK_OPACITY}" shape-rendering="geometricPrecision" />`
     )
 
     const fraction = barsForStyle[0]?.fraction
@@ -263,7 +264,7 @@ export function makeTrayBarsSvg(args: {
         const circumference = 2 * Math.PI * radius
         const dash = circumference * clamped
         parts.push(
-          `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="black" stroke-width="${strokeW}" stroke-linecap="butt" stroke-dasharray="${dash} ${circumference}" transform="rotate(-90 ${cx} ${cy})" opacity="${BARS_FILL_OPACITY}" shape-rendering="geometricPrecision" />`
+          `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeW}" stroke-linecap="butt" stroke-dasharray="${dash} ${circumference}" transform="rotate(-90 ${cx} ${cy})" opacity="${BARS_FILL_OPACITY}" shape-rendering="geometricPrecision" />`
         )
       }
     }
@@ -290,7 +291,7 @@ export function makeTrayBarsSvg(args: {
       const x = layout.barsX
 
       parts.push(
-        `<rect x="${x}" y="${y}" width="${trackW}" height="${trackH}" rx="${rx}" fill="black" opacity="${trackOpacity}" />`
+        `<rect x="${x}" y="${y}" width="${trackW}" height="${trackH}" rx="${rx}" fill="${color}" opacity="${trackOpacity}" />`
       )
 
       const fraction = bar?.fraction
@@ -300,7 +301,7 @@ export function makeTrayBarsSvg(args: {
           const movingEdgeRadius = Math.max(0, Math.floor(rx * 0.35))
           if (fillW >= trackW) {
             parts.push(
-              `<rect x="${x}" y="${y}" width="${fillW}" height="${trackH}" rx="${rx}" fill="black" opacity="${fillOpacity}" />`
+              `<rect x="${x}" y="${y}" width="${fillW}" height="${trackH}" rx="${rx}" fill="${color}" opacity="${fillOpacity}" />`
             )
           } else {
             const fillPath = makeRoundedBarPath({
@@ -311,7 +312,7 @@ export function makeTrayBarsSvg(args: {
               leftRadius: rx,
               rightRadius: movingEdgeRadius,
             })
-            parts.push(`<path d="${fillPath}" fill="black" opacity="${fillOpacity}" />`)
+            parts.push(`<path d="${fillPath}" fill="${color}" opacity="${fillOpacity}" />`)
           }
         }
 
@@ -325,7 +326,7 @@ export function makeTrayBarsSvg(args: {
             leftRadius: Math.max(0, Math.floor(rx * 0.2)),
             rightRadius: rx,
           })
-          parts.push(`<path d="${remainderPath}" fill="black" opacity="${remainderOpacity}" />`)
+          parts.push(`<path d="${remainderPath}" fill="${color}" opacity="${remainderOpacity}" />`)
         }
       }
     }
@@ -333,7 +334,7 @@ export function makeTrayBarsSvg(args: {
 
   if (text) {
     parts.push(
-      `<text x="${layout.textX}" y="${layout.textY}" fill="black" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif" font-size="${layout.fontSize}" font-weight="700" dominant-baseline="middle">${escapeXmlText(text)}</text>`
+      `<text x="${layout.textX}" y="${layout.textY}" fill="${color}" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif" font-size="${layout.fontSize}" font-weight="700" dominant-baseline="middle">${escapeXmlText(text)}</text>`
     )
   }
 
@@ -374,21 +375,81 @@ async function rasterizeSvgToRgba(svg: string, widthPx: number, heightPx: number
   }
 }
 
+const svgCache = new Map<string, string>()
+
+async function getSvgContent(url: string): Promise<string | null> {
+  if (svgCache.has(url)) {
+    return svgCache.get(url) || null
+  }
+  if (typeof window === "undefined" || typeof window.fetch !== "function") {
+    return null
+  }
+  // Check if it is likely an SVG path
+  const isSvg = url.split('?')[0].split('#')[0].toLowerCase().endsWith(".svg")
+  if (!isSvg) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 500)
+  try {
+    const res = await window.fetch(url, { signal: controller.signal })
+    clearTimeout(timeoutId)
+    if (!res.ok) return null
+    const text = await res.text()
+    svgCache.set(url, text)
+    return text
+  } catch (e) {
+    clearTimeout(timeoutId)
+    return null
+  }
+}
+
 export async function renderTrayBarsIcon(args: {
   bars: TrayPrimaryBar[]
   sizePx: number
   style?: MenubarIconStyle
   percentText?: string
   providerIconUrl?: string
+  color?: string
 }): Promise<Image> {
-  const { bars, sizePx, style = "provider", percentText, providerIconUrl } = args
+  const { bars, sizePx, style = "provider", percentText, providerIconUrl, color = "black" } = args
   const text = normalizePercentText(percentText)
+
+  let resolvedIconUrl = providerIconUrl
+  if (providerIconUrl && providerIconUrl.trim().length > 0) {
+    let svgText: string | null = null
+    if (providerIconUrl.startsWith("data:image/svg+xml;base64,")) {
+      try {
+        const base64 = providerIconUrl.substring("data:image/svg+xml;base64,".length)
+        svgText = atob(base64)
+      } catch (e) {
+        console.error("Failed to decode base64 SVG:", e)
+      }
+    } else if (providerIconUrl.startsWith("data:image/svg+xml;utf8,")) {
+      try {
+        const raw = providerIconUrl.substring("data:image/svg+xml;utf8,".length)
+        svgText = decodeURIComponent(raw)
+      } catch (e) {
+        console.error("Failed to decode utf8 SVG:", e)
+      }
+    } else if (!providerIconUrl.startsWith("data:")) {
+      svgText = await getSvgContent(providerIconUrl)
+    }
+
+    if (svgText) {
+      const coloredSvgText = svgText.replace(/currentColor/g, color)
+      resolvedIconUrl = `data:image/svg+xml;utf8,${encodeURIComponent(coloredSvgText)}`
+    }
+  }
+
   const svg = makeTrayBarsSvg({
     bars,
     sizePx,
     style,
     percentText: text,
-    providerIconUrl,
+    providerIconUrl: resolvedIconUrl,
+    color,
   })
   const layout = getSvgLayout({
     sizePx,
