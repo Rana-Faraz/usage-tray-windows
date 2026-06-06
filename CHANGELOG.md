@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.26
+## v0.6.28
 
 ### New Features
 - **feat(antigravity)**: Add plan name tracking, update manifest, and deprecate gemini provider by @FelixIsaac
@@ -24,7 +24,7 @@
 
 ### Changelog
 
-**Full Changelog**: [v0.6.14...v0.6.26](https://github.com/Rana-Faraz/usage-tray-windows/compare/v0.6.14...v0.6.26)
+**Full Changelog**: [v0.6.14...v0.6.28](https://github.com/Rana-Faraz/usage-tray-windows/compare/v0.6.14...v0.6.28)
 
 - [7846dbc](https://github.com/Rana-Faraz/usage-tray-windows/commit/7846dbc) docs: simplify and shorten provider notes in Windows matrix by @FelixIsaac
 - [37340e3](https://github.com/Rana-Faraz/usage-tray-windows/commit/37340e3) docs: update local setup and testing instructions to use npm instead of bun by @FelixIsaac

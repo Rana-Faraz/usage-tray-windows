@@ -5233,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "usage-tray-windows"
-version = "0.6.26"
+version = "0.6.28"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
